@@ -1,0 +1,24 @@
+[project]
+name = "auto-llm-predictor"
+version = "0.1.0"
+description = "Automatic LLM predictor builder using LangGraph"
+requires-python = ">=3.11"
+dependencies = [
+    "langgraph>=0.2",
+    "langchain-core>=0.3",
+    "langchain-openai>=0.3",
+    "pandas>=2.0",
+    "scikit-learn>=1.3",
+    "numpy>=1.24",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+    "typing-extensions>=4.0",
+]
+
+[project.optional-dependencies]
+train = [
+    "llamafactory>=0.9",
+]
+
+[project.scripts]
+auto-llm-predictor = "auto_llm_predictor.main:main"

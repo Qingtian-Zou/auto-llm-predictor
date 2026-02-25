@@ -1,0 +1,20 @@
+.python-version
+.history
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+*.egg
+
+# Project outputs
+output/
+test_data.csv
+
+# IDE
+.vscode/
+.idea/
