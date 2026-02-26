@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
 import textwrap
 from pathlib import Path
 
@@ -17,7 +18,14 @@ def profile_csv(csv_path: str, max_rows: int = 5, max_cols: int = 60) -> str:
     value counts of likely-categorical columns, and sample rows.
     """
     path = Path(csv_path)
-    df = pd.read_csv(path, low_memory=False)
+    try:
+        df = pd.read_csv(path, low_memory=False)
+    except Exception as e:
+        return (
+            f"File: {path.name}\n"
+            f"ERROR: Failed to read CSV file: {e}\n"
+            f"The file may be malformed, use a non-CSV format, or have encoding issues."
+        )
 
     parts: list[str] = []
     parts.append(f"File: {path.name}")
@@ -42,7 +50,8 @@ def profile_csv(csv_path: str, max_rows: int = 5, max_cols: int = 60) -> str:
         parts.append("Numeric summary (first 20 numeric columns):\n" + desc + "\n")
 
     # Value counts on low-cardinality columns (likely targets / categories)
-    cat_cols = [c for c in df.columns if df[c].nunique() <= 20 and df[c].dtype == "object"
+    cat_cols = [c for c in df.columns
+                if (df[c].dtype == "object" and df[c].nunique() <= 20)
                 or df[c].nunique() <= 10]
     for c in cat_cols[:10]:
         vc = df[c].value_counts(dropna=False).head(10).to_dict()
@@ -60,7 +69,7 @@ def run_script(script_path: str, timeout: int = 300) -> tuple[bool, str]:
     """Run a Python script and return (success, combined_output)."""
     try:
         result = subprocess.run(
-            ["python", str(script_path)],
+            [sys.executable, str(script_path)],
             capture_output=True,
             text=True,
             timeout=timeout,

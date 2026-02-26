@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from collections import Counter
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage
@@ -66,7 +68,6 @@ def _build_review_summary(state: PipelineState) -> str:
         label = "Train data" if test_csv else "All data"
         parts.append(f"\n{label}: {len(all_data)} examples")
 
-        from collections import Counter
         label_counts = Counter(entry.get("output", "") for entry in all_data)
         total = sum(label_counts.values())
         parts.append(f"{label} class distribution:")
@@ -79,7 +80,6 @@ def _build_review_summary(state: PipelineState) -> str:
             test_data = json.load(f)
         parts.append(f"\nTest data: {len(test_data)} examples")
 
-        from collections import Counter
         label_counts = Counter(entry.get("output", "") for entry in test_data)
         total = sum(label_counts.values())
         parts.append("Test data class distribution:")
@@ -173,7 +173,6 @@ def route_after_review(state: PipelineState) -> str:
     if feedback.lower() in ("balance", "balance data", "yes balance", "oversample", "undersample"):
         return "write_balance_code"
     # Check for explicit balance request in free-text
-    import re
     if re.search(r'\b(balance|oversample|undersample)\b', feedback, re.IGNORECASE):
         return "write_balance_code"
     return "plan_preparation"
@@ -400,7 +399,6 @@ def _build_balance_summary(state: PipelineState) -> str:
         parts.append(f"Train set: {len(train_data)} examples")
 
         # Show class distribution
-        from collections import Counter
         label_counts = Counter(entry.get("output", "") for entry in train_data)
         total = sum(label_counts.values())
         parts.append("Train class distribution:")

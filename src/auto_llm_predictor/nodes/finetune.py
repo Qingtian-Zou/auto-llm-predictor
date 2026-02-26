@@ -39,6 +39,7 @@ def run_finetuning(state: PipelineState) -> dict:
         logger.error("Fine-tuning failed:\n%s", output[-2000:])
 
     return {
+        "finetune_succeeded": success,
         "messages": [
             HumanMessage(
                 content=f"[run_finetuning] {'SUCCESS' if success else 'FAILED'}. "

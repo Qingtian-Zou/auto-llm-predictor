@@ -119,6 +119,116 @@ def _apply_feedback_overrides(plan: dict, feedback: str) -> dict:
     return plan
 
 
+def _repair_json(s: str) -> str:
+    """Attempt to fix unclosed brackets / braces in LLM-generated JSON.
+
+    Uses a two-phase strategy:
+    1.  **Position-guided repair** — parse the string, and if the decoder
+        fails at a specific position (typically ``Expecting ',' delimiter``),
+        walk backward from that position to find the comma where a ``]``
+        should have been inserted, then *replace* that comma with ``], ``.
+    2.  **Tail repair** — count unmatched openers and append the
+        corresponding closers at the end.
+
+    This handles the common LLM failure mode where an array like
+    ``"data_cleaning_steps": ["step1…",`` is never closed with ``]``
+    before the next key-value pair begins, producing invalid JSON like
+    ``"data_cleaning_steps": ["step…", "reasoning": "…"}``.
+    """
+    MAX_ATTEMPTS = 5
+    prev_s = None
+
+    for _ in range(MAX_ATTEMPTS):
+        try:
+            json.loads(s)
+            return s  # already valid
+        except json.JSONDecodeError as e:
+            # Guard against infinite loops: if s didn't change, bail out
+            if s == prev_s:
+                break
+            prev_s = s
+
+            pos = e.pos
+            repaired = False
+            if pos is not None and pos > 0:
+                search_region = s[max(0, pos - 200):pos]
+                last_comma = search_region.rfind(",")
+                if last_comma >= 0:
+                    comma_pos = max(0, pos - 200) + last_comma
+                    # Verify we're inside an unclosed array up to this comma
+                    opens = _count_unclosed_brackets(s[:comma_pos])
+                    if opens > 0:
+                        # Replace the comma with "], " to close the array
+                        # and continue with the next key-value pair
+                        s = s[:comma_pos] + "], " + s[comma_pos + 1:].lstrip()
+                        repaired = True
+
+            if not repaired:
+                # Fallback: append missing closers at the end
+                s = _append_missing_closers(s)
+                break
+
+    return s
+
+
+def _count_unclosed_brackets(s: str) -> int:
+    """Count the number of unmatched '[' in s, respecting string literals."""
+    opens = 0
+    in_string = False
+    escape = False
+    for ch in s:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch == "[":
+            opens += 1
+        elif ch == "]":
+            opens -= 1
+    return opens
+
+
+def _append_missing_closers(s: str) -> str:
+    """Append missing ] and } to balance unclosed brackets/braces."""
+    stack: list[str] = []
+    in_string = False
+    escape = False
+    closers = {"[": "]", "{": "}"}
+
+    for ch in s:
+        if escape:
+            escape = False
+            continue
+        if ch == "\\" and in_string:
+            escape = True
+            continue
+        if ch == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if ch in closers:
+            stack.append(closers[ch])
+        elif ch in ("]", "}"):
+            if stack and stack[-1] == ch:
+                stack.pop()
+
+    if stack:
+        s = s.rstrip()
+        if s.endswith(","):
+            s = s[:-1]
+        s += "".join(reversed(stack))
+
+    return s
+
+
 def plan_preparation(state: PipelineState, *, llm) -> dict:
     """Ask the LLM to create a data preparation plan based on the data profile.
 
@@ -174,9 +284,19 @@ def plan_preparation(state: PipelineState, *, llm) -> dict:
 
     try:
         plan = json.loads(json_str)
-    except json.JSONDecodeError as e:
-        logger.error("Failed to parse LLM plan as JSON. String was:\n%s", json_str)
-        raise e
+    except json.JSONDecodeError:
+        # Attempt repair: LLMs sometimes produce unclosed brackets/braces
+        # (e.g. data_cleaning_steps: ["step..." without closing ])
+        repaired = _repair_json(json_str)
+        try:
+            plan = json.loads(repaired)
+            logger.warning(
+                "LLM plan JSON required bracket repair to parse. "
+                "Original error was in bracket balancing."
+            )
+        except json.JSONDecodeError as e2:
+            logger.error("Failed to parse LLM plan as JSON (even after repair). String was:\n%s", json_str[:2000])
+            raise e2
 
     # If features were pre-selected by ensemble and no user feedback,
     # preserve them exactly.
@@ -204,7 +324,6 @@ def plan_preparation(state: PipelineState, *, llm) -> dict:
     if pre_selected and not plan.get("dropped_features"): # Assuming 'preset_features' in snippet refers to 'pre_selected'
         final_dropped = state.get("dropped_features", [])
 
-    prep_plan = json.dumps(plan, indent=2)
     logger.info("Prep plan: selected %d features, balance=%s",
                 len(plan["selected_features"]), plan.get("balance_strategy", "none"))
 

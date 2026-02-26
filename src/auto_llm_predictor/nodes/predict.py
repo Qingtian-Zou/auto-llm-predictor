@@ -20,6 +20,31 @@ def run_prediction(state: PipelineState) -> dict:
     """
     run_dir = Path(state.get("run_dir", state["output_dir"]))
 
+    # Guard: skip prediction if fine-tuning failed or adapter is missing
+    adapter_path = state.get("adapter_path", "")
+    if not state.get("finetune_succeeded", False):
+        logger.warning("Fine-tuning did not succeed. Skipping prediction.")
+        return {
+            "train_predictions_path": "",
+            "test_predictions_path": "",
+            "messages": [
+                HumanMessage(
+                    content="[run_prediction] SKIPPED — fine-tuning did not succeed."
+                ),
+            ],
+        }
+    if adapter_path and not Path(adapter_path).exists():
+        logger.warning("Adapter directory does not exist: %s. Skipping prediction.", adapter_path)
+        return {
+            "train_predictions_path": "",
+            "test_predictions_path": "",
+            "messages": [
+                HumanMessage(
+                    content=f"[run_prediction] SKIPPED — adapter not found at {adapter_path}."
+                ),
+            ],
+        }
+
     results = {}
     for split, yaml_key, pred_dir_name in [
         ("train", "lmf_predict_train_yaml", "predict_train"),

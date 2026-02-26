@@ -127,6 +127,12 @@ Examples:
             print(f"  {m}", file=sys.stderr)
         sys.exit(1)
 
+    # Validate test ratio
+    if not (0 < args.test_ratio < 1):
+        print(f"Error: --test-ratio must be between 0 and 1 (exclusive), got {args.test_ratio}",
+              file=sys.stderr)
+        sys.exit(1)
+
     output_dir = args.output if args.output else f"output/{csv_path.stem}"
     output_dir = str(Path(output_dir).resolve())
     Path(output_dir).mkdir(parents=True, exist_ok=True)

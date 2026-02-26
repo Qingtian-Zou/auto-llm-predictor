@@ -147,6 +147,7 @@ eval_strategy: steps
     predict_train_yaml = f"""\
 ### model
 model_name_or_path: {model}
+trust_remote_code: true
 {quant_line}adapter_name_or_path: {sft_dir}
 
 ### method
@@ -178,6 +179,7 @@ flash_attn: {flash_attn}
     predict_test_yaml = f"""\
 ### model
 model_name_or_path: {model}
+trust_remote_code: true
 {quant_line}adapter_name_or_path: {sft_dir}
 
 ### method

@@ -63,7 +63,7 @@ def explore_data(state: PipelineState, *, llm) -> dict:
     raw = response.content.strip()
     logger.info("LLM explore response: %s", raw[:500])
 
-    # Parse the JSON response
+    # Parse the JSON response — extract JSON object robustly
     # Strip markdown fences if present
     if raw.startswith("```"):
         raw = raw.split("\n", 1)[1]
@@ -71,7 +71,22 @@ def explore_data(state: PipelineState, *, llm) -> dict:
             raw = raw[: raw.rfind("```")]
         raw = raw.strip()
 
-    analysis = json.loads(raw)
+    # Use regex to extract JSON object (handles conversational text around JSON)
+    import re
+    json_match = re.search(r"(\{.*\})", raw, re.DOTALL)
+    if json_match:
+        json_str = json_match.group(1).strip()
+    else:
+        json_str = raw.strip()
+
+    try:
+        analysis = json.loads(json_str)
+    except json.JSONDecodeError as e:
+        logger.error("Failed to parse LLM explore response as JSON. Raw response:\n%s", raw[:1000])
+        raise ValueError(
+            f"LLM returned unparseable response for data exploration. "
+            f"JSON error: {e}. Response preview: {raw[:200]}"
+        ) from e
 
     return {
         "data_profile": data_profile,

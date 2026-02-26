@@ -106,6 +106,9 @@ class PipelineState(TypedDict):
     adapter_path: str
     """Path to the LoRA adapter directory after fine-tuning."""
 
+    finetune_succeeded: bool
+    """Whether fine-tuning completed successfully."""
+
     train_predictions_path: str
     """Path to predictions JSONL on the training set."""
 

@@ -55,7 +55,16 @@ def load_state(output_dir: str) -> dict[str, Any]:
             f"Run the pipeline at least once before using --start-from."
         )
 
-    state = json.loads(state_path.read_text())
+    try:
+        state = json.loads(state_path.read_text())
+    except json.JSONDecodeError as e:
+        raise ValueError(
+            f"Pipeline state file is corrupted: {state_path}. "
+            f"JSON parse error: {e}. "
+            f"Delete the file and re-run the pipeline from scratch, "
+            f"or fix the JSON manually."
+        ) from e
+
     state["messages"] = []  # fresh message list for the new session
     logger.info("Loaded pipeline state from %s (%d fields)", state_path, len(state))
     return state
