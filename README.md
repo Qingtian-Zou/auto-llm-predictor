@@ -2,6 +2,8 @@
 
 Automatically build a fine-tuned LLM predictor from any CSV dataset. Powered by [LangGraph](https://github.com/langchain-ai/langgraph), the pipeline analyzes your data, generates preparation code, fine-tunes a language model via [LlamaFactory](https://github.com/hiyouga/LLaMA-Factory), and evaluates predictions — all with human-in-the-loop review via **CLI or Web UI**.
 
+![Auto LLM Predictor Web UI](resources/screenshot.png)
+
 ## Pipeline
 
 ```mermaid
@@ -74,24 +76,24 @@ pip install -e ".[webui]"
 
 ```bash
 # Minimal — auto-detect target column
-auto-llm-predictor --csv data/my_dataset.csv --model Qwen/Qwen2.5-7B-Instruct
+auto-llm-predictor --csv data/my_dataset.csv --model mistralai/Mistral-7B-Instruct-v0.3
 
 # Specify target and output directory
 auto-llm-predictor --csv data/patients.csv --target response \
-    --model Qwen/Qwen2.5-7B-Instruct --output output/exp1
+    --model mistralai/Mistral-7B-Instruct-v0.3 --output output/exp1
 
 # Use a different agent LLM
-auto-llm-predictor --csv data/patients.csv --model Qwen/Qwen2.5-7B-Instruct \
+auto-llm-predictor --csv data/patients.csv --model mistralai/Mistral-7B-Instruct-v0.3 \
     --agent-model gpt-4o \
     --agent-api-base https://api.openai.com/v1 \
     --agent-api-key ...
 
 # Resume a past experiment — re-split with a different ratio
-auto-llm-predictor --csv data/patients.csv --model Qwen/Qwen2.5-7B-Instruct \
+auto-llm-predictor --csv data/patients.csv --model mistralai/Mistral-7B-Instruct-v0.3 \
     --output output/exp1 --start-from split --test-ratio 0.3
 
 # Resume — jump straight to config review with new hyperparameters
-auto-llm-predictor --csv data/patients.csv --model Qwen/Qwen2.5-7B-Instruct \
+auto-llm-predictor --csv data/patients.csv --model mistralai/Mistral-7B-Instruct-v0.3 \
     --output output/exp1 --start-from config --epochs 5 --lora-rank 128
 ```
 

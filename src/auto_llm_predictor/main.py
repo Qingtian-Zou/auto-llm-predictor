@@ -33,13 +33,13 @@ def main():
         epilog="""\
 Examples:
   # Minimal (auto-detect target)
-  auto-llm-predictor --csv data/my_dataset.csv --model Qwen/Qwen2.5-7B-Instruct
+  auto-llm-predictor --csv data/my_dataset.csv --model mistralai/Mistral-7B-Instruct-v0.3
 
   # Specify target and output directory
-  auto-llm-predictor --csv data/patients.csv --target response --model Qwen/Qwen2.5-7B-Instruct --output output/exp1
+  auto-llm-predictor --csv data/patients.csv --target response --model mistralai/Mistral-7B-Instruct-v0.3 --output output/exp1
 
   # Use a different agent LLM
-  auto-llm-predictor --csv data/patients.csv --model Qwen/Qwen2.5-7B-Instruct \\
+  auto-llm-predictor --csv data/patients.csv --model mistralai/Mistral-7B-Instruct-v0.3 \\
     --agent-model gpt-4o --agent-api-base https://api.openai.com/v1 --agent-api-key sk-...
 """,
     )
