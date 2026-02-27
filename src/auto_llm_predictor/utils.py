@@ -89,6 +89,7 @@ def run_llamafactory(
     timeout: int = 7200,
     stream: bool = True,
     tail_chars: int = 5000,
+    log_callback: callable | None = None,
 ) -> tuple[bool, str]:
     """Run llamafactory-cli train with a YAML config.
 
@@ -131,6 +132,8 @@ def run_llamafactory(
                 line = line.rstrip("\n")
                 print(f"{prefix}{line}", flush=True)
                 output_lines.append(line)
+                if log_callback:
+                    log_callback(f"{prefix}{line}")
         except ValueError:
             pass  # pipe closed
         finally:

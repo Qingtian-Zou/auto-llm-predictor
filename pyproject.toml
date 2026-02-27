@@ -1,6 +1,6 @@
 [project]
 name = "auto-llm-predictor"
-version = "0.1.0"
+version = "0.2.0"
 description = "Automatic LLM predictor builder using LangGraph"
 requires-python = ">=3.11"
 dependencies = [
@@ -19,6 +19,12 @@ dependencies = [
 train = [
     "llamafactory>=0.9",
 ]
+webui = [
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.30",
+    "python-multipart>=0.0.7",
+]
 
 [project.scripts]
 auto-llm-predictor = "auto_llm_predictor.main:main"
+auto-llm-predictor-webui = "auto_llm_predictor.webui:main"

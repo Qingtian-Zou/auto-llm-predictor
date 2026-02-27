@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Auto LLM Predictor</title>
+    <meta name="description"
+        content="Automatically build a fine-tuned LLM predictor from any CSV dataset — powered by LangGraph.">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+        rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+
+<body>
+    <!-- ── Ambient background ────────────────────────── -->
+    <div class="bg-glow bg-glow--1"></div>
+    <div class="bg-glow bg-glow--2"></div>
+
+    <!-- ── Header ────────────────────────────────────── -->
+    <header class="header">
+        <div class="header__brand">
+            <svg class="header__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                <path d="M2 17l10 5 10-5" />
+                <path d="M2 12l10 5 10-5" />
+            </svg>
+            <h1 class="header__title">Auto LLM Predictor</h1>
+        </div>
+        <span class="header__tag">WebUI</span>
+    </header>
+
+    <!-- ── Main layout ───────────────────────────────── -->
+    <main class="main">
+        <!-- LEFT: Config Panel -->
+        <section id="config-panel" class="panel config-panel">
+            <h2 class="panel__title">
+                <span class="panel__dot"></span>
+                Configuration
+            </h2>
+
+            <form id="run-form" class="form" enctype="multipart/form-data">
+                <!-- Dataset -->
+                <fieldset class="form__group">
+                    <legend class="form__legend">Dataset</legend>
+                    <label class="form__label" for="csv-file">CSV File <span class="req">*</span></label>
+                    <div class="file-drop" id="file-drop">
+                        <input type="file" id="csv-file" name="csv_file" accept=".csv" required>
+                        <div class="file-drop__text">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32"
+                                height="32">
+                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                <polyline points="14 2 14 8 20 8" />
+                            </svg>
+                            <span>Drop CSV file or <em>browse</em></span>
+                        </div>
+                        <div class="file-drop__name" id="file-name"></div>
+                    </div>
+
+                    <label class="form__label" for="test-csv-file">Test CSV <span
+                            class="form__optional">(optional)</span></label>
+                    <div class="file-drop file-drop--sm" id="test-file-drop">
+                        <input type="file" id="test-csv-file" name="test_csv_file" accept=".csv">
+                        <div class="file-drop__text">
+                            <span>Drop test CSV or <em>browse</em></span>
+                        </div>
+                        <div class="file-drop__name" id="test-file-name"></div>
+                    </div>
+
+                    <label class="form__label" for="target">Target Column</label>
+                    <input type="text" id="target" name="target" placeholder="(auto-detect)" class="form__input">
+
+                    <label class="form__label" for="output">Output Directory</label>
+                    <input type="text" id="output" name="output" placeholder="output/<csv_stem>" class="form__input">
+
+                    <label class="form__label" for="test-ratio">Test Ratio <span class="form__optional">(ignored if test
+                            CSV set)</span></label>
+                    <input type="number" id="test-ratio" name="test_ratio" value="0.2" step="0.05" min="0.05" max="0.95"
+                        class="form__input form__input--sm">
+                </fieldset>
+
+                <!-- Model -->
+                <fieldset class="form__group">
+                    <legend class="form__legend">Model</legend>
+                    <label class="form__label" for="model">HuggingFace Model ID <span class="req">*</span></label>
+                    <input type="text" id="model" name="model" value="meta-llama/Meta-Llama-3-8B"
+                        placeholder="meta-llama/Meta-Llama-3-8B" required class="form__input">
+                </fieldset>
+
+                <!-- Agent LLM (collapsible) -->
+                <details class="form__group form__details">
+                    <summary class="form__legend form__legend--click">Agent LLM<span class="chevron">›</span></summary>
+                    <p class="form__hint">Leave blank to use <code>.env</code> defaults.</p>
+                    <label class="form__label" for="agent-api-base">API Base</label>
+                    <input type="text" id="agent-api-base" name="agent_api_base" placeholder="from .env"
+                        class="form__input">
+                    <label class="form__label" for="agent-api-key">API Key</label>
+                    <input type="password" id="agent-api-key" name="agent_api_key" placeholder="from .env"
+                        class="form__input">
+                    <label class="form__label" for="agent-model">Agent Model</label>
+                    <input type="text" id="agent-model" name="agent_model" placeholder="from .env" class="form__input">
+                    <label class="form__label" for="coder-model">Coder Model</label>
+                    <input type="text" id="coder-model" name="coder_model" placeholder="from .env" class="form__input">
+                    <label class="form__label" for="agent-temperature">Temperature</label>
+                    <input type="number" id="agent-temperature" name="agent_temperature" value="0.2" step="0.05" min="0"
+                        max="2" class="form__input form__input--sm">
+                </details>
+
+                <!-- Hyperparameters (collapsible) -->
+                <details class="form__group form__details">
+                    <summary class="form__legend form__legend--click">Training Hyperparameters<span
+                            class="chevron">›</span></summary>
+                    <div class="form__grid">
+                        <div>
+                            <label class="form__label" for="lora-rank">LoRA Rank</label>
+                            <input type="number" id="lora-rank" name="lora_rank" value="64"
+                                class="form__input form__input--sm">
+                        </div>
+                        <div>
+                            <label class="form__label" for="lora-alpha">LoRA Alpha</label>
+                            <input type="number" id="lora-alpha" name="lora_alpha" value="128"
+                                class="form__input form__input--sm">
+                        </div>
+                        <div>
+                            <label class="form__label" for="cutoff-len">Cutoff Length</label>
+                            <input type="number" id="cutoff-len" name="cutoff_len" value="4096"
+                                class="form__input form__input--sm">
+                        </div>
+                        <div>
+                            <label class="form__label" for="epochs">Epochs</label>
+                            <input type="number" id="epochs" name="epochs" value="3.0" step="0.5"
+                                class="form__input form__input--sm">
+                        </div>
+                        <div>
+                            <label class="form__label" for="learning-rate">Learning Rate</label>
+                            <input type="text" id="learning-rate" name="learning_rate" value="2.0e-5"
+                                class="form__input form__input--sm">
+                        </div>
+                        <div>
+                            <label class="form__label" for="batch-size">Batch Size</label>
+                            <input type="number" id="batch-size" name="batch_size" value="2"
+                                class="form__input form__input--sm">
+                        </div>
+                        <div>
+                            <label class="form__label" for="grad-accumulation">Grad Accum</label>
+                            <input type="number" id="grad-accumulation" name="grad_accumulation" value="8"
+                                class="form__input form__input--sm">
+                        </div>
+                        <div>
+                            <label class="form__label" for="precision">Precision</label>
+                            <select id="precision" name="precision" class="form__input form__input--sm">
+                                <option value="bf16" selected>bf16</option>
+                                <option value="fp16">fp16</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form__label" for="flash-attn">Flash Attn</label>
+                            <select id="flash-attn" name="flash_attn" class="form__input form__input--sm">
+                                <option value="auto" selected>auto</option>
+                                <option value="fa2">fa2</option>
+                                <option value="disabled">disabled</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form__label" for="logging-steps">Log Steps</label>
+                            <input type="number" id="logging-steps" name="logging_steps" value="10"
+                                class="form__input form__input--sm">
+                        </div>
+                        <div>
+                            <label class="form__label" for="save-steps">Save Steps</label>
+                            <input type="number" id="save-steps" name="save_steps" value="500"
+                                class="form__input form__input--sm">
+                        </div>
+                        <div class="form__checkbox-row">
+                            <input type="checkbox" id="use-dora" name="use_dora">
+                            <label for="use-dora">Enable DoRA</label>
+                        </div>
+                    </div>
+                </details>
+
+                <div class="form__actions">
+                    <button type="submit" id="run-btn" class="btn btn--primary">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18"
+                            height="18">
+                            <polygon points="5 3 19 12 5 21 5 3" />
+                        </svg>
+                        Start Pipeline
+                    </button>
+                    <button type="button" id="cancel-btn" class="btn btn--danger btn--hidden">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18"
+                            height="18">
+                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                            <line x1="9" y1="9" x2="15" y2="15" />
+                            <line x1="15" y1="9" x2="9" y2="15" />
+                        </svg>
+                        Cancel
+                    </button>
+                </div>
+            </form>
+        </section>
+
+        <!-- RIGHT: Pipeline & Log -->
+        <section class="panel output-panel">
+            <!-- Pipeline progress -->
+            <div id="pipeline-section" class="pipeline-section">
+                <div class="panel__heading-row">
+                    <h2 class="panel__title">
+                        <span class="panel__dot panel__dot--blue"></span>
+                        Pipeline
+                    </h2>
+                    <div class="dropdown">
+                        <button type="button" id="export-btn" class="btn btn--sm dropdown__toggle" disabled>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14"
+                                height="14">
+                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                <polyline points="7 10 12 15 17 10" />
+                                <line x1="12" y1="15" x2="12" y2="3" />
+                            </svg>
+                            Export
+                        </button>
+                        <div id="export-menu" class="dropdown__menu dropdown__menu--hidden">
+                            <!-- Artifact links will be injected here -->
+                        </div>
+                    </div>
+                </div>
+                <div id="pipeline-steps" class="steps">
+                    <div class="step" data-step="explore_data"><span class="step__dot"></span><span
+                            class="step__label">Explore Data</span></div>
+                    <div class="step" data-step="select_features"><span class="step__dot"></span><span
+                            class="step__label">Select Features</span></div>
+                    <div class="step" data-step="plan_preparation"><span class="step__dot"></span><span
+                            class="step__label">Plan Prep</span></div>
+                    <div class="step" data-step="review_prep_plan"><span class="step__dot"></span><span
+                            class="step__label">Review Plan</span></div>
+                    <div class="step" data-step="write_prep_code"><span class="step__dot"></span><span
+                            class="step__label">Write Code</span></div>
+                    <div class="step" data-step="execute_prep_code"><span class="step__dot"></span><span
+                            class="step__label">Execute Code</span></div>
+                    <div class="step" data-step="verify_prepared_data"><span class="step__dot"></span><span
+                            class="step__label">Verify Data</span></div>
+                    <div class="step" data-step="review_prep_data"><span class="step__dot"></span><span
+                            class="step__label">Review Data</span></div>
+                    <div class="step" data-step="split_data"><span class="step__dot"></span><span
+                            class="step__label">Split
+                            Data</span></div>
+                    <div class="step" data-step="generate_lmf_config"><span class="step__dot"></span><span
+                            class="step__label">Gen Config</span></div>
+                    <div class="step" data-step="review_lmf_config"><span class="step__dot"></span><span
+                            class="step__label">Review Config</span></div>
+                    <div class="step" data-step="run_finetuning"><span class="step__dot"></span><span
+                            class="step__label">Fine-tune</span></div>
+                    <div class="step" data-step="run_prediction"><span class="step__dot"></span><span
+                            class="step__label">Predict</span></div>
+                    <div class="step" data-step="run_evaluation"><span class="step__dot"></span><span
+                            class="step__label">Evaluate</span></div>
+                </div>
+            </div>
+
+            <!-- Review panel (hidden until interrupt) -->
+            <div id="review-panel" class="review-panel review-panel--hidden">
+                <h3 class="review-panel__title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="8" x2="12" y2="12" />
+                        <line x1="12" y1="16" x2="12.01" y2="16" />
+                    </svg>
+                    <span id="review-panel-label">Review Checkpoint</span>
+                </h3>
+                <pre id="review-summary" class="review-panel__summary"></pre>
+                <!-- Editable plan (for review_prep_plan only) -->
+                <textarea id="plan-editor" class="review-panel__editor review-panel__editor--hidden" rows="18"
+                    spellcheck="false"></textarea>
+                <form id="review-form" class="review-panel__form">
+                    <input type="text" id="review-input" class="form__input" placeholder="approve  /  your feedback...">
+                    <div class="review-panel__actions">
+                        <button type="button" id="approve-btn" class="btn btn--approve">✓ Approve</button>
+                        <button type="button" id="save-plan-btn" class="btn btn--send btn--hidden">💾 Save Plan</button>
+                        <button type="submit" id="send-btn" class="btn btn--send">Send Feedback</button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Results panel (hidden until complete) -->
+            <div id="results-panel" class="results-panel results-panel--hidden">
+                <h3 class="results-panel__title">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
+                        <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                    Results
+                </h3>
+                <div id="results-content" class="results-panel__content"></div>
+            </div>
+
+            <!-- Log output -->
+            <div class="log-section">
+                <h2 class="panel__title">
+                    <span class="panel__dot panel__dot--green"></span>
+                    Live Log
+                </h2>
+                <div id="log" class="log"></div>
+            </div>
+        </section>
+    </main>
+
+    <script src="/static/app.js?v=3"></script>
+</body>
+
+</html>

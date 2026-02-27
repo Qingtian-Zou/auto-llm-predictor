@@ -27,8 +27,10 @@ from auto_llm_predictor.nodes.review import (
     review_balanced_data,
     review_lmf_config,
     review_prep_data,
+    review_prep_plan,
     route_after_balance_review,
     route_after_config_review,
+    route_after_plan_review,
     route_after_review,
 )
 from auto_llm_predictor.nodes.split import split_data
@@ -118,6 +120,7 @@ def build_graph(
     graph.add_node("explore_data", _bind_llm(explore_data, agent_llm))
     graph.add_node("select_features", select_features)
     graph.add_node("plan_preparation", _bind_llm(plan_preparation, agent_llm))
+    graph.add_node("review_prep_plan", review_prep_plan)
 
     # Coder LLM: code generation
     graph.add_node("write_prep_code", _bind_llm(write_prep_code, coder_llm))
@@ -163,7 +166,15 @@ def build_graph(
     )
     graph.add_edge("select_features", "plan_preparation")
 
-    graph.add_edge("plan_preparation", "write_prep_code")
+    graph.add_edge("plan_preparation", "review_prep_plan")
+    graph.add_conditional_edges(
+        "review_prep_plan",
+        route_after_plan_review,
+        {
+            "write_prep_code": "write_prep_code",
+            "plan_preparation": "plan_preparation",
+        },
+    )
     graph.add_edge("write_prep_code", "execute_prep_code")
 
     # Conditional: retry code generation on failure (up to 3 times)

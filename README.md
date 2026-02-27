@@ -1,6 +1,6 @@
 # Auto LLM Predictor
 
-Automatically build a fine-tuned LLM predictor from any CSV dataset. Powered by [LangGraph](https://github.com/langchain-ai/langgraph), the pipeline analyzes your data, generates preparation code, fine-tunes a language model via [LlamaFactory](https://github.com/hiyouga/LLaMA-Factory), and evaluates predictions — all with human-in-the-loop review at critical checkpoints.
+Automatically build a fine-tuned LLM predictor from any CSV dataset. Powered by [LangGraph](https://github.com/langchain-ai/langgraph), the pipeline analyzes your data, generates preparation code, fine-tunes a language model via [LlamaFactory](https://github.com/hiyouga/LLaMA-Factory), and evaluates predictions — all with human-in-the-loop review via **CLI or Web UI**.
 
 ## Pipeline
 
@@ -10,7 +10,9 @@ graph TD
     B -->|yes| FS["select_features<br/>(ensemble)"]
     B -->|no| C["plan_preparation"]
     FS --> C
-    C --> D["write_prep_code"]
+    C --> RP["review_prep_plan<br/>⏸ interrupt"]
+    RP -->|approve| D["write_prep_code"]
+    RP -->|revise| C
     D --> E["execute_prep_code"]
     E -->|failed ≤3×| D
     E -->|success| V["verify_prepared_data<br/>(LLM automated)"]
@@ -36,6 +38,7 @@ graph TD
 | **explore_data** | Profiles the CSV and uses an LLM to identify the target column, task type, and label mapping. **Verifies header alignment** if `--test-csv` is provided |
 | **select_features** | Ensemble feature selection for high-dimensional data (≥50 columns): variance filtering → correlation ranking → mutual information → Random Forest importance → average-rank aggregation |
 | **plan_preparation** | LLM decides instruction template, input format, balancing strategy, and data cleaning steps |
+| **review_prep_plan** | ⏸ Human review of the preparation plan (features, instruction, target mapping, balance strategy) |
 | **write_prep_code** | LLM generates a self-contained Python script to convert CSV → `all_data.json` (+ `test_data.json` if test CSV provided) |
 | **execute_prep_code** | Runs the generated script; retries up to 3× on failure with error feedback |
 | **verify_prepared_data** | LLM examines random samples from the output JSONs to verify Alpaca format, label consistency, and cross-split terminology |
@@ -60,6 +63,9 @@ pip install -e .
 
 # With LlamaFactory for fine-tuning (includes torch, transformers, etc.)
 pip install -e ".[train]"
+
+# With Web UI (FastAPI & Uvicorn)
+pip install -e ".[webui]"
 ```
 
 > **Note:** If you already have [LlamaFactory](https://github.com/hiyouga/LLaMA-Factory) installed in your environment, the base install is sufficient.
@@ -88,6 +94,21 @@ auto-llm-predictor --csv data/patients.csv --model Qwen/Qwen2.5-7B-Instruct \
 auto-llm-predictor --csv data/patients.csv --model Qwen/Qwen2.5-7B-Instruct \
     --output output/exp1 --start-from config --epochs 5 --lora-rank 128
 ```
+
+### Web UI
+
+Launch the browser-based interface for a more interactive experience:
+
+```bash
+auto-llm-predictor-webui
+# Application starts on http://localhost:8000
+```
+
+The Web UI provides:
+- **Live Progress**: Node-by-node execution tracking and logging via Server-Sent Events (SSE).
+- **Interactive Reviews**: Pause at checkpoints with dedicated forms for approval or feedback.
+- **Inline Editors**: Direct editing of JSON plans and YAML configs in the browser.
+- **Artifact Export**: One-click download of generated scripts, datasets, and configurations.
 
 ### Environment Configuration
 
@@ -140,7 +161,24 @@ CLI flags override `.env` values when both are specified.
 
 ## Human-in-the-Loop Review
 
-The pipeline pauses at three checkpoints using LangGraph's `interrupt()` API:
+The pipeline pauses at four checkpoints using LangGraph's `interrupt()` API:
+
+### Plan Review (`review_prep_plan`)
+
+After the LLM generates its data preparation plan, you see a summary of selected features, dropped features, the instruction template, input/output format, target mapping, balance strategy, and data cleaning steps. Respond with:
+
+- **`approve`** — Proceed to code generation
+- **Feedback** — loops back to re-plan. Supported patterns:
+
+```
+drop features: patient_id, smoker
+add features: weight, height
+change instruction to: Predict whether the patient will respond to treatment
+change target mapping: 0=No Response, 1=Response
+use oversample
+```
+
+**[NEW] Direct JSON Editing:** You can also paste a complete JSON block as your response to manually override the entire plan.
 
 ### Data Review (`review_prep_data`)
 
@@ -186,6 +224,8 @@ learning_rate: 1.0e-5
 per_device_train_batch_size: 4
 cutoff_len: 4096
 ```
+
+**[NEW] Direct YAML Editing:** You can paste a complete LlamaFactory YAML block as your response to manually override the training configuration.
 
 **Training-only parameters:** `lora_rank`, `lora_alpha`, `lora_dropout`, `lora_target`, `use_dora`, `num_train_epochs`, `learning_rate`, `lr_scheduler_type`, `warmup_ratio`, `per_device_train_batch_size`, `gradient_accumulation_steps`, `save_steps`, `save_strategy`, `save_total_limit`, `logging_steps`, `val_size`, `eval_steps`, `plot_loss`, `report_to`, `ddp_timeout`
 
@@ -240,10 +280,12 @@ output/<csv_stem>/
 ```
 src/auto_llm_predictor/
 ├── main.py                     # CLI entry point with interrupt/resume loop
+├── webui.py                    # Web UI server (FastAPI + SSE + threads)
 ├── graph.py                    # LangGraph pipeline definition
 ├── state.py                    # PipelineState TypedDict schema
 ├── checkpoint.py               # Save/load state for --start-from
 ├── utils.py                    # CSV profiling, script execution, YAML I/O
+├── static/                     # Web UI frontend (HTML/CSS/JS)
 ├── prompts/
 │   ├── explore.py              # Data analysis prompts
 │   ├── plan.py                 # Preparation planning prompts
@@ -276,4 +318,5 @@ src/auto_llm_predictor/
 - **pyyaml** ≥ 6.0 — YAML config generation
 - **python-dotenv** ≥ 1.0 — `.env` configuration loading
 - **typing-extensions** ≥ 4.0 — type annotations
+- **fastapi, uvicorn, python-multipart** — Web UI dependencies
 - **[LlamaFactory](https://github.com/hiyouga/LLaMA-Factory)** ≥ 0.9 — fine-tuning & prediction (optional: `pip install -e ".[train]"`)

@@ -5,7 +5,9 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from langgraph.types import Command
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 
 from auto_llm_predictor.state import PipelineState
 from auto_llm_predictor.utils import run_llamafactory
@@ -13,12 +15,13 @@ from auto_llm_predictor.utils import run_llamafactory
 logger = logging.getLogger(__name__)
 
 
-def run_prediction(state: PipelineState) -> dict:
+def run_prediction(state: PipelineState, config: RunnableConfig) -> dict:
     """Run LlamaFactory prediction on both train and test sets.
 
     Writes: train_predictions_path, test_predictions_path, messages
     """
     run_dir = Path(state.get("run_dir", state["output_dir"]))
+    log_callback = config.get("configurable", {}).get("log_callback")
 
     # Guard: skip prediction if fine-tuning failed or adapter is missing
     adapter_path = state.get("adapter_path", "")
@@ -62,7 +65,9 @@ def run_prediction(state: PipelineState) -> dict:
         print(f"Config: {yaml_path}")
         print("=" * 60 + "\n", flush=True)
 
-        success, output = run_llamafactory(yaml_path, timeout=3600, stream=True)
+        success, output = run_llamafactory(
+            yaml_path, timeout=3600, stream=True, log_callback=log_callback
+        )
 
         pred_path = run_dir / pred_dir_name / "generated_predictions.jsonl"
         if success and pred_path.exists():

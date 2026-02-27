@@ -23,6 +23,157 @@ from auto_llm_predictor.state import PipelineState
 logger = logging.getLogger(__name__)
 
 
+# ── Plan review ───────────────────────────────────────────────────
+
+
+def _build_plan_summary(state: PipelineState) -> str:
+    """Build a human-readable summary of the LLM preparation plan for review."""
+    plan_json = state.get("prep_plan", "{}")
+    try:
+        plan = json.loads(plan_json)
+    except json.JSONDecodeError:
+        plan = {}
+
+    parts = [
+        "=" * 60,
+        "DATA PREPARATION PLAN REVIEW",
+        "=" * 60,
+        "",
+        f"Target column:   {state.get('target_column', 'N/A')}",
+        f"Task type:       {state.get('task_type', 'N/A')}",
+        f"Target mapping:  {json.dumps(state.get('target_mapping', {}), indent=2)}",
+        "",
+    ]
+
+    # Selected features
+    features = plan.get("selected_features", state.get("selected_features", []))
+    parts.append(f"Selected features ({len(features)}):")
+    for feat in features:
+        parts.append(f"  - {feat}")
+
+    # Dropped features (single line)
+    dropped = plan.get("dropped_features", state.get("dropped_features", []))
+    if dropped:
+        parts.extend(["", f"Dropped features ({len(dropped)}): {', '.join(dropped)}"])
+
+    parts.extend([
+        "",
+        f"Feature selection reason: {plan.get('feature_selection_reason', 'N/A')}",
+        "",
+        "-" * 40,
+        "INSTRUCTION TEMPLATE",
+        "-" * 40,
+        plan.get("instruction_template", "(not set)"),
+        "",
+        f"Input format:    {plan.get('input_format', 'N/A')}",
+        f"Output format:   {plan.get('output_format', 'N/A')}",
+        f"Balance strategy: {plan.get('balance_strategy', 'none')}",
+        f"Test ratio:      {plan.get('test_ratio', 0.2)}",
+    ])
+
+    cleaning = plan.get("data_cleaning_steps", [])
+    if cleaning:
+        parts.append("")
+        parts.append("Data cleaning steps:")
+        for i, step in enumerate(cleaning, 1):
+            parts.append(f"  {i}. {step}")
+
+    reasoning = plan.get("reasoning", "")
+    if reasoning:
+        parts.extend(["", f"Reasoning: {reasoning}"])
+
+    parts.extend([
+        "",
+        "=" * 60,
+        "Please review the above plan and respond with one of:",
+        "  'approve'   — Proceed to code generation",
+        "  Or provide feedback to revise the plan, e.g.:",
+        "    'drop features: patient_id, smoker'",
+        "    'change instruction to: Predict the drug response...'",
+        "    'change target mapping: 0=No Response, 1=Response'",
+        "    'use oversample'",
+        "=" * 60,
+    ])
+
+    return "\n".join(parts)
+
+
+def review_prep_plan(state: PipelineState) -> dict:
+    """Pause for human review of the data preparation plan.
+
+    Uses ``interrupt()`` to present the plan summary to the user and wait
+    for approval, revision feedback, or a directly-edited plan JSON.
+    """
+    summary = _build_plan_summary(state)
+
+    user_response = interrupt(summary)
+
+    user_response = str(user_response).strip()
+    approved = user_response.lower() in ("approve", "approved", "ok", "yes", "y", "lgtm", "")
+
+    # Check if the user submitted an edited plan JSON directly
+    if not approved and user_response.startswith("{"):
+        try:
+            edited_plan = json.loads(user_response)
+            logger.info("User submitted edited plan JSON directly")
+            # Extract state-level variables that may have been injected
+            # for editing (keeps CLI and webUI in sync)
+            state_updates: dict = {
+                # Treat manual JSON edits as feedback so it routes back to plan_preparation
+                # for LLM validation and instruction_template regeneration.
+                "user_feedback": (
+                    "I have manually edited the preparation plan JSON (e.g. changed target mapping "
+                    "or selected features). Please verify the new plan. Crucially, strictly ensure "
+                    "your 'instruction_template' perfectly reflects any new target_mapping or features "
+                    "I just provided."
+                ),
+            }
+            # Extract state-level variables
+            for key in ("target_column", "target_mapping", "task_type", "selected_features", "dropped_features"):
+                if key in edited_plan:
+                    state_updates[key] = edited_plan.pop(key)
+            
+            # The LLM will regenerate the plan, but we can pass the edited one
+            # forward so it's in the message history for context.
+            state_updates["prep_plan"] = json.dumps(edited_plan)
+            state_updates["messages"] = [
+                HumanMessage(
+                    content="[review_prep_plan] User edited the plan directly. "
+                    "Routing back to plan_preparation for validation and instruction update."
+                ),
+            ]
+            return state_updates
+        except json.JSONDecodeError:
+            pass  # Not valid JSON — treat as text feedback
+
+    logger.info("User plan review response: %s (approved=%s)", user_response[:100], approved)
+
+    return {
+        "user_feedback": user_response if not approved else "",
+        "messages": [
+            HumanMessage(
+                content=f"[review_prep_plan] User {'approved' if approved else 'requested changes'}: "
+                + (user_response[:200] if not approved else "Proceeding to code generation.")
+            ),
+        ],
+    }
+
+
+def route_after_plan_review(state: PipelineState) -> str:
+    """Conditional edge: route based on plan review.
+
+    Returns 'write_prep_code' if approved,
+    'plan_preparation' to re-plan with user feedback.
+    """
+    feedback = state.get("user_feedback", "")
+    if not feedback:
+        return "write_prep_code"
+    return "plan_preparation"
+
+
+# ── Data review ───────────────────────────────────────────────────
+
+
 def _build_review_summary(state: PipelineState) -> str:
     """Build a human-readable summary of the prepared data for review."""
     output_dir = Path(state["output_dir"])
@@ -341,6 +492,46 @@ def review_lmf_config(state: PipelineState) -> dict:
     }
 
     if not approved:
+        # Check if the user submitted an edited YAML directly
+        if "model_name_or_path:" in user_response or "### model" in user_response:
+            train_yaml_path = state.get("lmf_train_yaml", "")
+            if train_yaml_path and Path(train_yaml_path).exists():
+                with open(train_yaml_path, "w") as f:
+                    f.write(user_response)
+
+                # Parse the edited YAML to sync state variables
+                state_updates: dict = {
+                    "config_feedback": "",  # clear so routing goes to finetuning
+                    "messages": [
+                        HumanMessage(
+                            content="[review_lmf_config] User edited the config directly. "
+                            "Proceeding to fine-tuning with updated config."
+                        ),
+                    ],
+                }
+                try:
+                    import yaml
+                    edited_config = yaml.safe_load(user_response) or {}
+                    # Extract base_model
+                    if "model_name_or_path" in edited_config:
+                        state_updates["base_model"] = edited_config["model_name_or_path"]
+                    # Sync training_config with any recognized training params
+                    tc = dict(state.get("training_config", {}))
+                    _tc_keys = set(_TRAIN_ONLY_KEYS) | {
+                        "cutoff_len", "bf16", "fp16", "flash_attn",
+                        "quantization_bit", "per_device_eval_batch_size",
+                        "preprocessing_num_workers", "template",
+                    }
+                    for k in _tc_keys:
+                        if k in edited_config:
+                            tc[k] = edited_config[k]
+                    state_updates["training_config"] = tc
+                except Exception:
+                    logger.warning("Could not parse edited YAML to sync state", exc_info=True)
+
+                logger.info("User edited train config directly")
+                return state_updates
+
         # Parse overrides and merge into training_config
         overrides = _parse_overrides(user_response)
         if overrides:

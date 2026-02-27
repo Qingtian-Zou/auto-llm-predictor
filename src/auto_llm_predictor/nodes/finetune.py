@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import logging
 
+from langgraph.types import Command
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 
 from auto_llm_predictor.state import PipelineState
 from auto_llm_predictor.utils import run_llamafactory
@@ -12,7 +14,7 @@ from auto_llm_predictor.utils import run_llamafactory
 logger = logging.getLogger(__name__)
 
 
-def run_finetuning(state: PipelineState) -> dict:
+def run_finetuning(state: PipelineState, config: RunnableConfig) -> dict:
     """Run LlamaFactory SFT fine-tuning.
 
     Writes: adapter_path, messages
@@ -20,12 +22,19 @@ def run_finetuning(state: PipelineState) -> dict:
     yaml_path = state["lmf_train_yaml"]
     logger.info("Starting fine-tuning with config: %s", yaml_path)
 
+    log_callback = config.get("configurable", {}).get("log_callback")
+
     print("\n" + "=" * 60)
     print("FINE-TUNING — llamafactory-cli train")
     print(f"Config: {yaml_path}")
     print("=" * 60 + "\n", flush=True)
 
-    success, output = run_llamafactory(yaml_path, timeout=7200, stream=True)
+    success, output = run_llamafactory(
+        yaml_path,
+        timeout=7200,
+        stream=True,
+        log_callback=log_callback,
+    )
 
     if success:
         print("\n" + "=" * 60)
