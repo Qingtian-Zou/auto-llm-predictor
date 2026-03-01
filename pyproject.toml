@@ -2,6 +2,10 @@
 name = "auto-llm-predictor"
 version = "0.2.0"
 description = "Automatic LLM predictor builder using LangGraph"
+authors = [
+    { name = "Qingtian Zou" },
+]
+license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 dependencies = [
     "langgraph>=0.2",

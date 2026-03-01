@@ -322,3 +322,7 @@ src/auto_llm_predictor/
 - **typing-extensions** ≥ 4.0 — type annotations
 - **fastapi, uvicorn, python-multipart** — Web UI dependencies
 - **[LlamaFactory](https://github.com/hiyouga/LLaMA-Factory)** ≥ 0.9 — fine-tuning & prediction (optional: `pip install -e ".[train]"`)
+
+## License
+
+This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
