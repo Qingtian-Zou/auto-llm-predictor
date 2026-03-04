@@ -287,6 +287,7 @@ def create_app() -> FastAPI:
         quantization_bit: int | None = Form(None),
         flash_attn: str = Form("auto"),
         precision: str = Form("bf16"),
+        xai: bool = Form(False),
     ):
         from auto_llm_predictor.graph import build_graph
 
@@ -344,6 +345,7 @@ def create_app() -> FastAPI:
             "messages": [],
             "prep_attempts": 0,
             "auto_cutoff": auto_cutoff,
+            "xai_enabled": xai,
             "training_config": {
                 "lora_rank": lora_rank,
                 "lora_alpha": lora_alpha,
@@ -504,7 +506,8 @@ def create_app() -> FastAPI:
             "lmf_train_yaml": "Training Config (train.yaml)",
             "lmf_predict_train_yaml": "Predict Train Config (predict_train.yaml)",
             "lmf_predict_test_yaml": "Predict Test Config (predict_test.yaml)",
-            "lmf_eval_yaml": "Evaluation Config (eval.yaml)"
+            "lmf_eval_yaml": "Evaluation Config (eval.yaml)",
+            "xai_report_path": "XAI Report (xai_report.json)",
         }
         
         available = []

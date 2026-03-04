@@ -184,6 +184,10 @@
                             <input type="checkbox" id="use-dora" name="use_dora">
                             <label for="use-dora">Enable DoRA</label>
                         </div>
+                        <div class="form__checkbox-row">
+                            <input type="checkbox" id="xai" name="xai">
+                            <label for="xai">Enable XAI <span class="form__optional">(attention-based explanations)</span></label>
+                        </div>
                     </div>
                 </details>
 
@@ -269,6 +273,8 @@
                             class="step__label">Predict</span></div>
                     <div class="step" data-step="run_evaluation"><span class="step__dot"></span><span
                             class="step__label">Evaluate</span></div>
+                    <div class="step" data-step="run_xai"><span class="step__dot"></span><span
+                            class="step__label">XAI</span></div>
                 </div>
             </div>
 

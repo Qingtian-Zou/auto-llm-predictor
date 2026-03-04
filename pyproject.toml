@@ -28,6 +28,9 @@ webui = [
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.7",
 ]
+xai = [
+    "matplotlib>=3.5",
+]
 
 [project.scripts]
 auto-llm-predictor = "auto_llm_predictor.main:main"
