@@ -69,6 +69,9 @@ class RunState:
     loop: asyncio.AbstractEventLoop | None = None
     # pipeline state for results
     final_state: dict = field(default_factory=dict)
+    # review synchronization
+    _review_event: threading.Event = field(default_factory=threading.Event)
+    _review_response: str | None = None
 
 
 _runs: dict[str, RunState] = {}
@@ -93,16 +96,41 @@ def _emit(run: RunState, event_type: str, data: dict | str) -> None:
 def _stream_graph(run: RunState, input_data: dict | Any) -> None:
     """Stream the graph, emitting node_start / node_complete SSE events.
 
+    Uses stream_mode=["updates", "debug"] so that the "debug" stream fires a
+    "task" event *before* a node begins executing and a "task_result" event
+    *after* it completes.  This ensures node_start reaches the browser while
+    the node is still running, enabling the breathing-light animation to
+    display for the full duration of the stage.
+
     Returns when the graph finishes or hits an interrupt.
     """
-    for chunk in run.app.stream(input_data, config=run.thread_config, stream_mode="updates"):
+    for mode, chunk in run.app.stream(
+        input_data, config=run.thread_config, stream_mode=["updates", "debug"]
+    ):
         if run.cancelled:
             break
-        # Each chunk is {node_name: node_output}
-        for node_name, _node_output in chunk.items():
-            run.current_node = node_name
-            _emit(run, "node_start", {"node": node_name, "message": f"Running: {node_name}"})
-            _emit(run, "node_complete", {"node": node_name, "message": f"Completed: {node_name}"})
+
+        if mode == "debug":
+            # chunk is a dict with keys: type, timestamp, step, payload
+            event_type = chunk.get("type")
+            payload = chunk.get("payload", {})
+            node_name = payload.get("name", "")
+
+            # Skip internal LangGraph bookkeeping nodes
+            if not node_name or node_name.startswith("__") or node_name == "route_start":
+                continue
+
+            if event_type == "task":
+                # Node is about to start — fire start event immediately
+                run.current_node = node_name
+                _emit(run, "node_start", {"node": node_name, "message": f"Running: {node_name}"})
+
+            elif event_type == "task_result":
+                # Node just finished
+                _emit(run, "node_complete", {"node": node_name, "message": f"Completed: {node_name}"})
+
+        # "updates" mode chunks (node_name -> output dict) are intentionally
+        # ignored here — we rely entirely on the debug events for timing.
 
 
 def _run_pipeline(run: RunState, initial_state: dict) -> None:
@@ -168,12 +196,11 @@ def _run_pipeline(run: RunState, initial_state: dict) -> None:
             _emit(run, "interrupt", interrupt_data)
 
             # Park this thread until the user responds via POST /api/review
-            review_event = threading.Event()
-            run._review_event = review_event  # type: ignore[attr-defined]
-            run._review_response = None       # type: ignore[attr-defined]
-            review_event.wait()               # blocks pipeline thread
+            run._review_event = threading.Event()
+            run._review_response = None
+            run._review_event.wait()               # blocks pipeline thread
 
-            user_input = run._review_response or "approve"  # type: ignore[attr-defined]
+            user_input = run._review_response or "approve"
             run.status = "running"
             _emit(run, "status", {
                 "status": "running",
@@ -416,8 +443,8 @@ def create_app() -> FastAPI:
                 content={"error": f"Run is not waiting for review (status: {run.status})"},
             )
 
-        run._review_response = response.strip() or "approve"  # type: ignore[attr-defined]
-        run._review_event.set()  # type: ignore[attr-defined]
+        run._review_response = response.strip() or "approve"
+        run._review_event.set()
 
         return {"status": "resumed", "response": run._review_response}
 
@@ -449,8 +476,8 @@ def create_app() -> FastAPI:
         run.error = "Cancelled by user"
 
         # If waiting for review, unblock it
-        if hasattr(run, "_review_event") and not run._review_event.is_set():
-            run._review_response = "cancel"  # type: ignore[attr-defined]
+        if not run._review_event.is_set():
+            run._review_response = "cancel"
             run._review_event.set()
 
         _emit(run, "error", {"message": "Pipeline cancelled by user."})

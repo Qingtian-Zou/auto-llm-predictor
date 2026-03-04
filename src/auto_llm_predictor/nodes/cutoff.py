@@ -108,6 +108,16 @@ def _percentile(sorted_values: list[int], pct: float) -> int:
 # Node
 # ---------------------------------------------------------------------------
 
+def _default_cutoff(reason: str) -> dict:
+    """Return a safe default cutoff_len=1024 with an explanatory message."""
+    logger.warning("%s — using safe default cutoff_len=1024", reason)
+    return {
+        "cutoff_len": 1024,
+        "messages": [
+            HumanMessage(content=f"[determine_cutoff_len] {reason}; using default cutoff_len=1024."),
+        ],
+    }
+
 def determine_cutoff_len(state: PipelineState) -> dict:
     """Determine the cutoff length to use for LlamaFactory training.
 
@@ -151,43 +161,16 @@ def determine_cutoff_len(state: PipelineState) -> dict:
         train_path = output_dir / "data" / "train.json"
 
     if not train_path.exists():
-        logger.warning(
-            "train.json not found at %s — using safe default cutoff_len=1024", train_path
-        )
-        return {
-            "cutoff_len": 1024,
-            "messages": [
-                HumanMessage(
-                    content="[determine_cutoff_len] train.json not found; using default cutoff_len=1024."
-                ),
-            ],
-        }
+        return _default_cutoff(f"train.json not found at {train_path}")
 
     try:
         with open(train_path) as f:
             data = json.load(f)
     except Exception as exc:
-        logger.warning("Failed to read train.json (%s) — using safe default", exc)
-        return {
-            "cutoff_len": 1024,
-            "messages": [
-                HumanMessage(
-                    content=f"[determine_cutoff_len] Could not read train.json ({exc}); "
-                    "using default cutoff_len=1024."
-                ),
-            ],
-        }
+        return _default_cutoff(f"Could not read train.json ({exc})")
 
     if not data:
-        logger.warning("train.json is empty — using safe default cutoff_len=1024")
-        return {
-            "cutoff_len": 1024,
-            "messages": [
-                HumanMessage(
-                    content="[determine_cutoff_len] train.json is empty; using default cutoff_len=1024."
-                ),
-            ],
-        }
+        return _default_cutoff("train.json is empty")
 
     # ── Load tokenizer ────────────────────────────────────────────────────────
     base_model = state.get("base_model", "")

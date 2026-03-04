@@ -30,7 +30,7 @@ from auto_llm_predictor.state import PipelineState
 logger = logging.getLogger(__name__)
 
 # Threshold: datasets with >= this many feature columns trigger ensemble selection
-HIGH_DIM_THRESHOLD = 50
+HIGH_DIM_THRESHOLD = 100
 
 
 # ── Individual ranking methods ────────────────────────────────────

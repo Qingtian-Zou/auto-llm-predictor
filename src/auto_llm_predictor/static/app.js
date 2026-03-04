@@ -62,56 +62,37 @@
     }
 
     // ── File drop behaviour ─────────────────────────────────────
-    fileInput.addEventListener("change", () => {
-        if (fileInput.files.length) {
-            fileName.textContent = fileInput.files[0].name;
-            fileName.classList.add("file-drop__name--show");
-        }
-    });
-    fileDrop.addEventListener("dragover", e => {
-        e.preventDefault();
-        fileDrop.classList.add("file-drop--active");
-    });
-    fileDrop.addEventListener("dragleave", () => {
-        fileDrop.classList.remove("file-drop--active");
-    });
-    fileDrop.addEventListener("drop", e => {
-        e.preventDefault();
-        fileDrop.classList.remove("file-drop--active");
-        if (e.dataTransfer.files.length) {
-            fileInput.files = e.dataTransfer.files;
-            fileName.textContent = e.dataTransfer.files[0].name;
-            fileName.classList.add("file-drop__name--show");
-        }
-    });
+    function setupFileDrop(input, dropZone, nameEl) {
+        input.addEventListener("change", () => {
+            if (input.files.length) {
+                nameEl.textContent = input.files[0].name;
+                nameEl.classList.add("file-drop__name--show");
+            }
+        });
+        dropZone.addEventListener("dragover", e => {
+            e.preventDefault();
+            dropZone.classList.add("file-drop--active");
+        });
+        dropZone.addEventListener("dragleave", () => {
+            dropZone.classList.remove("file-drop--active");
+        });
+        dropZone.addEventListener("drop", e => {
+            e.preventDefault();
+            dropZone.classList.remove("file-drop--active");
+            if (e.dataTransfer.files.length) {
+                input.files = e.dataTransfer.files;
+                nameEl.textContent = e.dataTransfer.files[0].name;
+                nameEl.classList.add("file-drop__name--show");
+            }
+        });
+    }
 
-    // ── Test CSV file drop behaviour ────────────────────────────
-    const testFileInput = document.getElementById("test-csv-file");
-    const testFileDrop = document.getElementById("test-file-drop");
-    const testFileName = document.getElementById("test-file-name");
-
-    testFileInput.addEventListener("change", () => {
-        if (testFileInput.files.length) {
-            testFileName.textContent = testFileInput.files[0].name;
-            testFileName.classList.add("file-drop__name--show");
-        }
-    });
-    testFileDrop.addEventListener("dragover", e => {
-        e.preventDefault();
-        testFileDrop.classList.add("file-drop--active");
-    });
-    testFileDrop.addEventListener("dragleave", () => {
-        testFileDrop.classList.remove("file-drop--active");
-    });
-    testFileDrop.addEventListener("drop", e => {
-        e.preventDefault();
-        testFileDrop.classList.remove("file-drop--active");
-        if (e.dataTransfer.files.length) {
-            testFileInput.files = e.dataTransfer.files;
-            testFileName.textContent = e.dataTransfer.files[0].name;
-            testFileName.classList.add("file-drop__name--show");
-        }
-    });
+    setupFileDrop(fileInput, fileDrop, fileName);
+    setupFileDrop(
+        document.getElementById("test-csv-file"),
+        document.getElementById("test-file-drop"),
+        document.getElementById("test-file-name"),
+    );
 
     // ── Form submission ─────────────────────────────────────────
     form.addEventListener("submit", async (e) => {
@@ -238,8 +219,8 @@
         "review_prep_plan", "write_prep_code", "execute_prep_code",
         "verify_prepared_data", "review_prep_data", "write_balance_code",
         "execute_balance_code", "review_balanced_data", "split_data",
-        "generate_lmf_config", "review_lmf_config", "run_finetuning",
-        "run_prediction", "run_evaluation",
+        "determine_cutoff_len", "generate_lmf_config", "review_lmf_config",
+        "run_finetuning", "run_prediction", "run_evaluation",
     ];
 
     let activeStepIndex = -1;
@@ -330,44 +311,32 @@
     const reviewLabel = document.getElementById("review-panel-label");
     let isPlanEditMode = false;
 
+    function enterEditorMode(label, content, saveLabel) {
+        isPlanEditMode = true;
+        reviewLabel.textContent = label;
+        reviewSummary.style.display = "none";
+        planEditor.classList.remove("review-panel__editor--hidden");
+        planEditor.value = content;
+        savePlanBtn.classList.remove("btn--hidden");
+        savePlanBtn.innerHTML = saveLabel;
+        document.getElementById("send-btn").classList.add("btn--hidden");
+        reviewInput.style.display = "none";
+        planEditor.focus();
+    }
+
     function showReview(evt) {
         const summary = evt.summary || "";
         const node = evt.node || "";
 
         if (node === "review_prep_plan" && evt.prep_plan) {
-            // Plan editing mode
-            isPlanEditMode = true;
-            reviewLabel.textContent = "Edit Preparation Plan";
-            reviewSummary.style.display = "none";
-            planEditor.classList.remove("review-panel__editor--hidden");
-            // Pretty-print the JSON plan
+            let content = evt.prep_plan;
             try {
-                const parsed = JSON.parse(evt.prep_plan);
-                planEditor.value = JSON.stringify(parsed, null, 2);
-            } catch {
-                planEditor.value = evt.prep_plan;
-            }
-            // Show Save Plan, hide Send Feedback
-            savePlanBtn.classList.remove("btn--hidden");
-            savePlanBtn.innerHTML = "💾 Save Plan";
-            document.getElementById("send-btn").classList.add("btn--hidden");
-            reviewInput.style.display = "none";
-            planEditor.focus();
+                content = JSON.stringify(JSON.parse(content), null, 2);
+            } catch { /* keep raw */ }
+            enterEditorMode("Edit Preparation Plan", content, "💾 Save Plan");
         } else if (node === "review_lmf_config" && evt.lmf_train_yaml) {
-            // LlamaFactory Config editing mode
-            isPlanEditMode = true;
-            reviewLabel.textContent = "Edit LlamaFactory Config";
-            reviewSummary.style.display = "none";
-            planEditor.classList.remove("review-panel__editor--hidden");
-            planEditor.value = evt.lmf_train_yaml;
-            // Show Save Config, hide Send Feedback
-            savePlanBtn.classList.remove("btn--hidden");
-            savePlanBtn.innerHTML = "💾 Save Config";
-            document.getElementById("send-btn").classList.add("btn--hidden");
-            reviewInput.style.display = "none";
-            planEditor.focus();
+            enterEditorMode("Edit LlamaFactory Config", evt.lmf_train_yaml, "💾 Save Config");
         } else {
-            // Normal feedback mode
             isPlanEditMode = false;
             reviewLabel.textContent = "Review Checkpoint";
             reviewSummary.style.display = "";

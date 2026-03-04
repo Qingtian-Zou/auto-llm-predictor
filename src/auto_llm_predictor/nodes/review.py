@@ -22,6 +22,13 @@ from auto_llm_predictor.state import PipelineState
 
 logger = logging.getLogger(__name__)
 
+_APPROVAL_RESPONSES = frozenset({"approve", "approved", "ok", "yes", "y", "lgtm", ""})
+
+
+def _is_approved(response: str) -> bool:
+    """Return True if the user response indicates approval."""
+    return response.lower() in _APPROVAL_RESPONSES
+
 
 # ── Plan review ───────────────────────────────────────────────────
 
@@ -149,7 +156,7 @@ def review_prep_plan(state: PipelineState) -> dict:
     user_response = interrupt(summary)
 
     user_response = str(user_response).strip()
-    approved = user_response.lower() in ("approve", "approved", "ok", "yes", "y", "lgtm", "")
+    approved = _is_approved(user_response)
 
     # Check if the user submitted an edited plan JSON directly
     if not approved and user_response.startswith("{"):
@@ -331,7 +338,7 @@ def review_prep_data(state: PipelineState) -> dict:
     user_response = interrupt(summary)
 
     user_response = str(user_response).strip()
-    approved = user_response.lower() in ("approve", "approved", "ok", "yes", "y", "lgtm", "")
+    approved = _is_approved(user_response)
 
     logger.info("User review response: %s (approved=%s)", user_response[:100], approved)
 
@@ -515,7 +522,7 @@ def review_lmf_config(state: PipelineState) -> dict:
 
     user_response = interrupt(summary)
     user_response = str(user_response).strip()
-    approved = user_response.lower() in ("approve", "approved", "ok", "yes", "y", "lgtm", "")
+    approved = _is_approved(user_response)
 
     result: dict = {
         "config_feedback": user_response if not approved else "",
@@ -678,7 +685,7 @@ def review_balanced_data(state: PipelineState) -> dict:
     save_state(state, state["output_dir"])
     user_response = interrupt(summary)
     user_response = str(user_response).strip()
-    approved = user_response.lower() in ("approve", "approved", "ok", "yes", "y", "lgtm", "")
+    approved = _is_approved(user_response)
 
     logger.info("Balance review response: %s (approved=%s)", user_response[:100], approved)
 
