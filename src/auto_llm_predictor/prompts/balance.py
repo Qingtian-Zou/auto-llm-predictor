@@ -26,7 +26,6 @@ The "output" field contains the class label.
 === BALANCING TASK ===
 Task type: {task_type}
 Balance strategy: {balance_strategy}
-Target mapping: {target_mapping}
 
 === REQUIREMENTS ===
 The script must:
@@ -66,7 +65,6 @@ def format_balance_prompt(
     output_json_path: str,
     task_type: str,
     balance_strategy: str,
-    target_mapping: dict,
     previous_error: str = "",
     user_feedback: str = "",
 ) -> str:
@@ -84,7 +82,6 @@ def format_balance_prompt(
         output_json_path=output_json_path,
         task_type=task_type,
         balance_strategy=balance_strategy,
-        target_mapping=target_mapping,
         error_context=error_context,
         user_feedback_context=user_feedback_context,
     )

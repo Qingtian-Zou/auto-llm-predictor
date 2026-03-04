@@ -22,7 +22,7 @@ def write_balance_code(state: PipelineState, *, llm) -> dict:
     """
     output_dir = state["output_dir"]
     data_dir = str(Path(output_dir) / "data")
-    data_json_path = state.get("all_data_path", str(Path(data_dir) / "all_data.json"))
+    data_json_path = str(Path(data_dir) / "all_data.json")
     output_json_path = str(Path(data_dir) / "balanced_data.json")
 
     # Get balance strategy from the prep plan
@@ -67,7 +67,6 @@ def write_balance_code(state: PipelineState, *, llm) -> dict:
         output_json_path=output_json_path,
         task_type=state.get("task_type", "binary"),
         balance_strategy=balance_strategy,
-        target_mapping=state.get("target_mapping", {}),
         previous_error=previous_error,
         user_feedback=balance_feedback,
     )
