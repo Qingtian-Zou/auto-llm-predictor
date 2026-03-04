@@ -76,7 +76,9 @@ def generate_lmf_config(state: PipelineState) -> dict:
     lora_rank = tc.get("lora_rank", 64)
     lora_alpha = tc.get("lora_alpha", 128)
     use_dora = str(tc.get("use_dora", False)).lower()
-    cutoff_len = tc.get("cutoff_len", 4096)
+    # Prefer the state-level cutoff_len (set by determine_cutoff_len); fall back to
+    # training_config (user-supplied via CLI) when the state field is not present.
+    cutoff_len = state.get("cutoff_len") or tc.get("cutoff_len", 4096)
     num_train_epochs = tc.get("num_train_epochs", 3.0)
     learning_rate = tc.get("learning_rate", "2.0e-5")
     batch_size = tc.get("per_device_train_batch_size", 2)

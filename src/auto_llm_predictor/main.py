@@ -93,7 +93,9 @@ Examples:
     hp.add_argument("--lora-rank", type=int, default=64, help="LoRA rank (default: 64)")
     hp.add_argument("--lora-alpha", type=int, default=128, help="LoRA alpha (default: 128)")
     hp.add_argument("--use-dora", action="store_true", default=False, help="Enable DoRA adapter")
-    hp.add_argument("--cutoff-len", type=int, default=4096, help="Max input token length (default: 4096)")
+    hp.add_argument("--cutoff-len", type=int, default=4096, help="Max input token length (default: 4096; ignored when --auto-cutoff is set)")
+    hp.add_argument("--auto-cutoff", action="store_true", default=False,
+                    help="Automatically determine cutoff_len from training data statistics instead of using --cutoff-len")
     hp.add_argument("--epochs", type=float, default=3.0, help="Number of training epochs (default: 3.0)")
     hp.add_argument("--learning-rate", type=str, default="2.0e-5", help="Learning rate (default: 2.0e-5)")
     hp.add_argument("--batch-size", type=int, default=2, help="Per-device train batch size (default: 2)")
@@ -163,6 +165,8 @@ Examples:
     print(f"Target:       {args.target or '(auto-detect)'}")
     print(f"Base model:   {args.model}")
     print(f"Output dir:   {output_dir}")
+    cutoff_display = '(auto-detect)' if args.auto_cutoff else str(args.cutoff_len)
+    print(f"Cutoff len:   {cutoff_display}")
     coder_model = args.coder_model or args.agent_model
     print(f"Agent LLM:    {args.agent_model} @ {args.agent_api_base}")
     print(f"Coder LLM:    {coder_model}")
@@ -189,6 +193,7 @@ Examples:
         initial_state["output_dir"] = output_dir
         initial_state["base_model"] = args.model
         initial_state["messages"] = []
+        initial_state["auto_cutoff"] = args.auto_cutoff
 
         # Merge CLI training_config overrides into the saved state
         cli_config = {
@@ -222,6 +227,7 @@ Examples:
             "start_from": "explore_data",
             "messages": [],
             "prep_attempts": 0,
+            "auto_cutoff": args.auto_cutoff,
             "training_config": {
                 "lora_rank": args.lora_rank,
                 "lora_alpha": args.lora_alpha,

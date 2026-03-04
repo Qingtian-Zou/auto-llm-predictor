@@ -106,6 +106,13 @@ class PipelineState(TypedDict):
     run_dir: str
     """Timestamped subdirectory for configs, sft, predictions, evaluation."""
 
+    # ── Cutoff length ──────────────────────────────────────────────
+    cutoff_len: int
+    """Resolved cutoff length (set by determine_cutoff_len; overrides training_config value)."""
+
+    auto_cutoff: bool
+    """Whether to auto-detect cutoff_len from training data statistics (--auto-cutoff flag)."""
+
     # ── LlamaFactory configuration ─────────────────────────────────
     lmf_train_yaml: str
     """Path to the generated train YAML config."""

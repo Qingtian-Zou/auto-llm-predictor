@@ -12,7 +12,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css">
+    <link rel="stylesheet" href="/static/style.css?v=2">
 </head>
 
 <body>
@@ -128,6 +128,12 @@
                             <label class="form__label" for="cutoff-len">Cutoff Length</label>
                             <input type="number" id="cutoff-len" name="cutoff_len" value="4096"
                                 class="form__input form__input--sm">
+                            <p class="form__hint">Ignored when Auto Cutoff is enabled.</p>
+                        </div>
+                        <div class="form__checkbox-row">
+                            <input type="checkbox" id="auto-cutoff" name="auto_cutoff">
+                            <label for="auto-cutoff">Auto Cutoff <span class="form__optional">(detect from
+                                    data)</span></label>
                         </div>
                         <div>
                             <label class="form__label" for="epochs">Epochs</label>
@@ -246,6 +252,8 @@
                     <div class="step" data-step="split_data"><span class="step__dot"></span><span
                             class="step__label">Split
                             Data</span></div>
+                    <div class="step" data-step="determine_cutoff_len"><span class="step__dot"></span><span
+                            class="step__label">Cutoff Length</span></div>
                     <div class="step" data-step="generate_lmf_config"><span class="step__dot"></span><span
                             class="step__label">Gen Config</span></div>
                     <div class="step" data-step="review_lmf_config"><span class="step__dot"></span><span

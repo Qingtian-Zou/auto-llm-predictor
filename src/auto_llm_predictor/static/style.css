@@ -562,7 +562,8 @@ select.form__input {
 .step--active {
     color: var(--accent);
     background: var(--accent-glow);
-    border-color: rgba(99, 179, 237, 0.3);
+    border-color: rgba(99, 179, 237, 0.45);
+    animation: breathe 2s ease-in-out infinite;
 }
 
 .step--active .step__dot {
@@ -589,15 +590,36 @@ select.form__input {
     background: var(--red);
 }
 
+@keyframes breathe {
+
+    0%,
+    100% {
+        box-shadow: 0 0 4px rgba(99, 179, 237, 0.25),
+            0 0 8px rgba(99, 179, 237, 0.15);
+        border-color: rgba(99, 179, 237, 0.35);
+        background: rgba(99, 179, 237, 0.12);
+    }
+
+    50% {
+        box-shadow: 0 0 10px rgba(99, 179, 237, 0.55),
+            0 0 22px rgba(99, 179, 237, 0.30),
+            0 0 40px rgba(99, 179, 237, 0.12);
+        border-color: rgba(99, 179, 237, 0.75);
+        background: rgba(99, 179, 237, 0.22);
+    }
+}
+
 @keyframes blink {
 
     0%,
     100% {
         opacity: 1;
+        box-shadow: 0 0 6px var(--accent), 0 0 12px rgba(99, 179, 237, 0.5);
     }
 
     50% {
-        opacity: 0.4;
+        opacity: 0.35;
+        box-shadow: 0 0 2px var(--accent);
     }
 }
 

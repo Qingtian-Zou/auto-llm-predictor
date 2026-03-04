@@ -250,6 +250,7 @@ def create_app() -> FastAPI:
         lora_alpha: int = Form(128),
         use_dora: bool = Form(False),
         cutoff_len: int = Form(4096),
+        auto_cutoff: bool = Form(False),
         epochs: float = Form(3.0),
         learning_rate: str = Form("2.0e-5"),
         batch_size: int = Form(2),
@@ -315,6 +316,7 @@ def create_app() -> FastAPI:
             "start_from": "explore_data",
             "messages": [],
             "prep_attempts": 0,
+            "auto_cutoff": auto_cutoff,
             "training_config": {
                 "lora_rank": lora_rank,
                 "lora_alpha": lora_alpha,

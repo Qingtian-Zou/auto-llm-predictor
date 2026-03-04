@@ -27,7 +27,8 @@ graph TD
     EB -->|success| RB["review_balanced_data<br/>⏸ interrupt"]
     RB -->|approve| S
     RB -->|revise| WB
-    S --> F["generate_lmf_config"]
+    S --> CL["determine_cutoff_len<br/>⏸ interrupt (if high)"]
+    CL --> F["generate_lmf_config"]
     F --> R2["review_lmf_config<br/>⏸ interrupt"]
     R2 -->|approve| G["run_finetuning"]
     R2 -->|change params| F
@@ -49,6 +50,7 @@ graph TD
 | **execute_balance_code** | Runs the balancing script; retries up to 3× on failure |
 | **review_balanced_data** | ⏸ Human review of class distributions after balancing |
 | **split_data** | Deterministic train/test split (stratified), or direct assignment if `--test-csv` is provided |
+| **determine_cutoff** | ⏸ Analyzes training data token lengths; automatically sets optimal cutoff or asks for percentile choice if maximum is very high (>10k tokens) |
 | **generate_lmf_config** | Creates LlamaFactory YAML configs for training and prediction |
 | **review_lmf_config** | ⏸ Human review of hyperparameters before fine-tuning |
 | **run_finetuning** | Executes `llamafactory-cli train` (output streamed live) |
@@ -108,6 +110,7 @@ auto-llm-predictor-webui
 
 The Web UI provides:
 - **Live Progress**: Node-by-node execution tracking and logging via Server-Sent Events (SSE).
+- **Visual Feedback**: Real-time status indicators (e.g., breathing light effects) for the active pipeline stage.
 - **Interactive Reviews**: Pause at checkpoints with dedicated forms for approval or feedback.
 - **Inline Editors**: Direct editing of JSON plans and YAML configs in the browser.
 - **Artifact Export**: One-click download of generated scripts, datasets, and configurations.
@@ -135,7 +138,7 @@ CLI flags override `.env` values when both are specified.
 | `--output` | `output/<csv_stem>` | Output directory |
 | `--test-csv` | *(none)* | Optional separate test CSV (skips splitting) |
 | `--test-ratio` | `0.2` | Test split ratio (ignored when `--test-csv` is set) |
-| `--start-from` | *(none)* | Resume from step: `review_prep`, `split`, or `config` |
+| `--start-from` | *(none)* | Resume from step: `review_prep`, `split`, `cutoff`, or `config` |
 | `--agent-api-base` | env: `openAI_endpoint` | OpenAI-compatible API base URL |
 | `--agent-api-key` | env: `auth_key` | API key for the LLM endpoint |
 | `--agent-model` | env: `agent_LLM` | Model ID for reasoning/planning |
@@ -143,14 +146,15 @@ CLI flags override `.env` values when both are specified.
 | `--agent-temperature` | `0.2` | Sampling temperature |
 | `-v` / `--verbose` | off | Enable debug logging |
 
-**Training Hyperparameters:**
+**Training & Robustness:**
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `--auto-cutoff` | off | Automatically determine optimal cutoff length from training data |
+| `--cutoff-len` | `2048` | Max input token length (overridden if `--auto-cutoff` is used) |
 | `--lora-rank` | `64` | LoRA rank |
 | `--lora-alpha` | `128` | LoRA alpha |
 | `--use-dora` | off | Enable DoRA adapter |
-| `--cutoff-len` | `2048` | Max input token length |
 | `--epochs` | `3.0` | Number of training epochs |
 | `--learning-rate` | `2.0e-5` | Learning rate |
 | `--batch-size` | `2` | Per-device train batch size |
@@ -200,6 +204,14 @@ change target mapping: 0: No, 1: Yes
 change instruction to: Predict whether the patient will respond to treatment
 ```
 
+### Cutoff Review (`determine_cutoff_len`)
+
+When `--auto-cutoff` is enabled, the pipeline analyzes your prepared training data. If the recommended maximum cutoff exceeds 10,000 tokens, it pauses to let you pick a lower percentile to save GPU memory:
+
+- **`approve`** / **Enter** — Accept the recommended maximum (100th percentile)
+- **`p95`**, **`p90`**, **`p85`**, **`p80`** — Use a lower percentile cutoff
+- **Custom Integer** — e.g., `4096`, uses that value directly
+
 ### Balance Review (`review_balanced_data`)
 
 After data balancing, you see the class distribution before and after. Respond with:
@@ -231,7 +243,13 @@ cutoff_len: 4096
 
 **Training-only parameters:** `lora_rank`, `lora_alpha`, `lora_dropout`, `lora_target`, `use_dora`, `num_train_epochs`, `learning_rate`, `lr_scheduler_type`, `warmup_ratio`, `per_device_train_batch_size`, `gradient_accumulation_steps`, `save_steps`, `save_strategy`, `save_total_limit`, `logging_steps`, `val_size`, `eval_steps`, `plot_loss`, `report_to`, `ddp_timeout`
 
-**Shared parameters (all YAMLs):** `cutoff_len`, `bf16`, `fp16`, `flash_attn`, `quantization_bit`, `per_device_eval_batch_size`, `preprocessing_num_workers`, `template`
+**Shared parameters (all YAMLs):** `bf16`, `fp16`, `flash_attn`, `quantization_bit`, `per_device_eval_batch_size`, `preprocessing_num_workers`, `template`
+
+## Robustness & Reliability
+
+- **Automated JSON Repair**: The pipeline includes a robust parsing layer that can automatically repair common LLM errors (e.g., unclosed brackets or trailing commas), significantly reducing pipeline crashes during planning and code generation.
+- **Retry Logic**: All code execution nodes (preparation, balancing) feature automated retries with error feedback loops, allowing the LLM to fix its own bugs.
+- **Human-in-the-Loop**: Checkpoints at every critical stage ensure you can override decisions before expensive GPU resources are consumed.
 
 ## Feature Selection
 

@@ -30,6 +30,7 @@ from auto_llm_predictor.nodes.balance import (
 )
 from auto_llm_predictor.nodes.codegen import write_prep_code
 from auto_llm_predictor.nodes.config import generate_lmf_config
+from auto_llm_predictor.nodes.cutoff import determine_cutoff_len
 from auto_llm_predictor.nodes.evaluate import run_evaluation
 from auto_llm_predictor.nodes.execute import check_prep_result, execute_prep_code
 from auto_llm_predictor.nodes.explore import explore_data
@@ -147,6 +148,7 @@ def build_graph(
 
     # No LLM needed
     graph.add_node("split_data", split_data)
+    graph.add_node("determine_cutoff_len", determine_cutoff_len)
     graph.add_node("generate_lmf_config", generate_lmf_config)
     graph.add_node("review_lmf_config", review_lmf_config)
     graph.add_node("run_finetuning", run_finetuning)
@@ -235,8 +237,9 @@ def build_graph(
         },
     )
 
-    # split → config generation
-    graph.add_edge("split_data", "generate_lmf_config")
+    # split → cutoff detection → config generation
+    graph.add_edge("split_data", "determine_cutoff_len")
+    graph.add_edge("determine_cutoff_len", "generate_lmf_config")
 
     graph.add_edge("generate_lmf_config", "review_lmf_config")
 

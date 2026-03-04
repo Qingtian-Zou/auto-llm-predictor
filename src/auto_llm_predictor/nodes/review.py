@@ -98,6 +98,46 @@ def _build_plan_summary(state: PipelineState) -> str:
     return "\n".join(parts)
 
 
+def _build_edit_feedback(state_updates: dict, edited_plan: dict) -> str:
+    """Build a concrete feedback string listing actual user edits.
+
+    Instead of a vague "I edited the plan" message, this enumerates every
+    changed field with its new value so the LLM can regenerate the plan
+    without asking clarifying questions.
+    """
+    import json as _json
+
+    parts = [
+        "The user has manually edited the preparation plan JSON. "
+        "Here are the EXACT updated values that MUST be used:"
+    ]
+
+    _STATE_KEYS = (
+        "target_mapping", "target_column", "task_type",
+        "selected_features", "dropped_features",
+    )
+    for key in _STATE_KEYS:
+        if key in state_updates:
+            parts.append(f"- {key}: {_json.dumps(state_updates[key])}")
+
+    # Include any remaining plan-level keys the user may have changed
+    _PLAN_KEYS = (
+        "instruction_template", "input_format", "output_format",
+        "balance_strategy", "test_ratio", "data_cleaning_steps",
+    )
+    for key in _PLAN_KEYS:
+        if key in edited_plan:
+            parts.append(f"- {key}: {_json.dumps(edited_plan[key])}")
+
+    parts.append(
+        "\nRegenerate the plan JSON incorporating these exact values. "
+        "Ensure 'instruction_template' perfectly reflects the updated "
+        "target_mapping and selected_features. "
+        "Respond ONLY with valid JSON — do NOT ask clarifying questions."
+    )
+    return "\n".join(parts)
+
+
 def review_prep_plan(state: PipelineState) -> dict:
     """Pause for human review of the data preparation plan.
 
@@ -118,21 +158,17 @@ def review_prep_plan(state: PipelineState) -> dict:
             logger.info("User submitted edited plan JSON directly")
             # Extract state-level variables that may have been injected
             # for editing (keeps CLI and webUI in sync)
-            state_updates: dict = {
-                # Treat manual JSON edits as feedback so it routes back to plan_preparation
-                # for LLM validation and instruction_template regeneration.
-                "user_feedback": (
-                    "I have manually edited the preparation plan JSON (e.g. changed target mapping "
-                    "or selected features). Please verify the new plan. Crucially, strictly ensure "
-                    "your 'instruction_template' perfectly reflects any new target_mapping or features "
-                    "I just provided."
-                ),
-            }
+            state_updates: dict = {}
             # Extract state-level variables
             for key in ("target_column", "target_mapping", "task_type", "selected_features", "dropped_features"):
                 if key in edited_plan:
                     state_updates[key] = edited_plan.pop(key)
-            
+
+            # Build concrete feedback with the actual changed values
+            state_updates["user_feedback"] = _build_edit_feedback(
+                state_updates, edited_plan,
+            )
+
             # The LLM will regenerate the plan, but we can pass the edited one
             # forward so it's in the message history for context.
             state_updates["prep_plan"] = json.dumps(edited_plan)

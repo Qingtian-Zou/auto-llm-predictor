@@ -259,11 +259,15 @@ def plan_preparation(state: PipelineState, *, llm) -> dict:
     # If the user provided feedback from a review cycle, append it
     user_feedback = state.get("user_feedback", "")
     if user_feedback:
+        previous_plan = state.get("prep_plan", "{}")
         user_prompt += (
             f"\n\n=== USER FEEDBACK (MUST FOLLOW) ===\n"
             f"The user reviewed the previous data preparation and requested changes:\n"
             f"{user_feedback}\n"
             f"Please revise the plan to incorporate this feedback.\n"
+            f"\n=== PREVIOUS PLAN (for reference) ===\n"
+            f"{previous_plan}\n"
+            f"Respond ONLY with valid JSON — do NOT ask questions or add commentary.\n"
         )
 
     messages = [
@@ -277,10 +281,20 @@ def plan_preparation(state: PipelineState, *, llm) -> dict:
 
     # Extract JSON object using regex (handles conversational text and missing fences)
     json_match = re.search(r"(\{.*\})", raw, re.DOTALL)
-    if json_match:
-        json_str = json_match.group(1).strip()
-    else:
-        json_str = raw.strip()
+    if not json_match:
+        logger.error(
+            "LLM did not return a JSON plan — got a conversational response instead. "
+            "Response was:\n%s",
+            raw[:500],
+        )
+        raise ValueError(
+            "LLM returned a conversational response instead of a JSON plan. "
+            "This usually means the model asked a clarifying question or refused to "
+            "generate the plan. Response snippet: "
+            + repr(raw[:200])
+        )
+
+    json_str = json_match.group(1).strip()
 
     try:
         plan = json.loads(json_str)
@@ -295,7 +309,11 @@ def plan_preparation(state: PipelineState, *, llm) -> dict:
                 "Original error was in bracket balancing."
             )
         except json.JSONDecodeError as e2:
-            logger.error("Failed to parse LLM plan as JSON (even after repair). String was:\n%s", json_str[:2000])
+            logger.error(
+                "Failed to parse LLM plan as JSON (even after repair). "
+                "String was:\n%s",
+                json_str[:2000],
+            )
             raise e2
 
     # If features were pre-selected by ensemble and no user feedback,
