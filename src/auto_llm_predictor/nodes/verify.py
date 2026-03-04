@@ -47,19 +47,26 @@ def verify_prepared_data(state: PipelineState, *, llm) -> dict:
     all_data_path = data_dir / "all_data.json"
     test_data_path = data_dir / "test_data.json"
     
-    # Extract properties
+    # Extract properties — read all fields that may have been modified at review_prep_plan
     task_desc = state.get("prep_plan", "Task description not provided in state.")
+    target_column = state.get("target_column", "N/A")
     target_mapping = state.get("target_mapping", {})
-    
+    selected_features = state.get("selected_features", [])
+    dropped_features = state.get("dropped_features", [])
+
     # Grab 3 random samples
     train_samples_str = _sample_jsonl(all_data_path, num_samples=3)
     test_samples_str = _sample_jsonl(test_data_path, num_samples=3)
-        
+
     user_prompt = VERIFY_DATA_USER.format(
         task_description=task_desc,
+        target_column=target_column,
         target_mapping=json.dumps(target_mapping, indent=2),
+        num_selected=len(selected_features),
+        selected_features=", ".join(selected_features) if selected_features else "(none)",
+        dropped_features=", ".join(dropped_features) if dropped_features else "(none)",
         train_samples=train_samples_str,
-        test_samples=test_samples_str
+        test_samples=test_samples_str,
     )
     
     messages = [
