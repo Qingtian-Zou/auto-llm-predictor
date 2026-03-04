@@ -1,8 +1,21 @@
 # Auto LLM Predictor
 
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/release/python-3110/)
+
 Automatically build a fine-tuned LLM predictor from any CSV dataset. Powered by [LangGraph](https://github.com/langchain-ai/langgraph), the pipeline analyzes your data, generates preparation code, fine-tunes a language model via [LlamaFactory](https://github.com/hiyouga/LLaMA-Factory), and evaluates predictions — all with human-in-the-loop review via **CLI or Web UI**.
 
 ![Auto LLM Predictor Web UI](resources/screenshot.png)
+
+## Core Features
+
+- **End-to-End Automation**: From raw CSV profiling to evaluation and explainability.
+- **Explainable AI (XAI)**: **[NEW]** Extract token-level attention scores to see exactly which parts of the input drove a prediction.
+- **Smart Data Handling**: Automated feature selection for high-dim data and intelligent class balancing.
+- **Human-in-the-Loop**: Pause at critical checkpoints to override plans, code, or hyperparameters.
+- **Direct Editing**: **[NEW]** Edit JSON preparation plans and LlamaFactory YAML configs inline (CLI or Web UI).
+- **Robustness**: Automated JSON repair and retry-on-failure logic for LLM-generated code.
+- **Web UI**: Modern dashboard with live logging, progress tracking, and artifact exporting.
 
 ## Pipeline
 
@@ -34,6 +47,10 @@ graph TD
     R2 -->|change params| F
     G --> H["run_prediction"]
     H --> I["run_evaluation"]
+    I --> X{"--xai?"}
+    X -->|yes| XAI["run_xai<br/>(attention-based)"]
+    X -->|no| DONE["END"]
+    XAI --> DONE
 ```
 
 | Stage | What it does |
@@ -56,6 +73,7 @@ graph TD
 | **run_finetuning** | Executes `llamafactory-cli train` (output streamed live) |
 | **run_prediction** | Runs prediction on train and test splits (output streamed live) |
 | **run_evaluation** | Computes accuracy, F1, confusion matrix via scikit-learn |
+| **run_xai** | *(optional, `--xai`)* **[NEW]** Loads fine-tuned model, extracts attention weights per test sample, and produces a token-level explanation report + heatmap |
 
 ## Installation
 
@@ -70,6 +88,9 @@ pip install -e ".[train]"
 
 # With Web UI (FastAPI & Uvicorn)
 pip install -e ".[webui]"
+
+# With XAI support (attention-based explanations; also requires [train])
+pip install -e ".[xai]"
 ```
 
 > **Note:** If you already have [LlamaFactory](https://github.com/hiyouga/LLaMA-Factory) installed in your environment, the base install is sufficient.
@@ -164,10 +185,11 @@ CLI flags override `.env` values when both are specified.
 | `--quantization-bit` | *(none)* | Quantization bits (`4` or `8`) |
 | `--flash-attn` | `fa2` | Flash attention (`auto`, `fa2`, `disabled`) |
 | `--precision` | `bf16` | Training precision (`bf16` or `fp16`) |
+| `--xai` | off | Run attention-based XAI explanations after evaluation (requires `[train]` deps and GPU) |
 
 ## Human-in-the-Loop Review
 
-The pipeline pauses at four checkpoints using LangGraph's `interrupt()` API:
+The pipeline pauses at five checkpoints using LangGraph's `interrupt()` API:
 
 ### Plan Review (`review_prep_plan`)
 
@@ -184,7 +206,7 @@ change target mapping: 0=No Response, 1=Response
 use oversample
 ```
 
-**[NEW] Direct JSON Editing:** You can also paste a complete JSON block as your response to manually override the entire plan.
+**[NEW] Direct JSON Editing:** You can paste a complete JSON block as your response to manually override the entire plan. In the Web UI, an inline JSON editor is provided.
 
 ### Data Review (`review_prep_data`)
 
@@ -239,7 +261,7 @@ per_device_train_batch_size: 4
 cutoff_len: 4096
 ```
 
-**[NEW] Direct YAML Editing:** You can paste a complete LlamaFactory YAML block as your response to manually override the training configuration.
+**[NEW] Direct YAML Editing:** You can paste a complete LlamaFactory YAML block as your response to manually override the training configuration. In the Web UI, you can directly edit the provided YAML block.
 
 **Training-only parameters:** `lora_rank`, `lora_alpha`, `lora_dropout`, `lora_target`, `use_dora`, `num_train_epochs`, `learning_rate`, `lr_scheduler_type`, `warmup_ratio`, `per_device_train_batch_size`, `gradient_accumulation_steps`, `save_steps`, `save_strategy`, `save_total_limit`, `logging_steps`, `val_size`, `eval_steps`, `plot_loss`, `report_to`, `ddp_timeout`
 
@@ -289,8 +311,11 @@ output/<csv_stem>/
 │   ├── sft/                     # LoRA adapter + training logs
 │   ├── predict_train/           # Predictions on training set
 │   ├── predict_test/            # Predictions on test set
-│   └── evaluation/
-│       └── results.json         # Accuracy, F1, confusion matrix
+│   ├── evaluation/
+│   │   └── results.json         # Accuracy, F1, confusion matrix
+│   └── xai/                     # (only if --xai)
+│       ├── xai_report.json      # Per-sample token-level explanations
+│       └── attention_heatmap.png # Top-token attention visualization
 └── run_20250221_091200/         # Next run — past runs preserved
     └── ...
 ```
@@ -325,7 +350,8 @@ src/auto_llm_predictor/
     ├── config.py               # Generates LlamaFactory YAMLs (with run_dir reuse)
     ├── finetune.py             # Runs llamafactory-cli train
     ├── predict.py              # Runs prediction on train/test
-    ├── evaluate.py             # Robust classification metrics (handles raw strings)
+    ├── evaluate.py              # Robust classification metrics (handles raw strings)
+    ├── explain.py               # Attention-based XAI explanations (optional)
 ```
 
 ## Dependencies
@@ -340,6 +366,7 @@ src/auto_llm_predictor/
 - **typing-extensions** ≥ 4.0 — type annotations
 - **fastapi, uvicorn, python-multipart** — Web UI dependencies
 - **[LlamaFactory](https://github.com/hiyouga/LLaMA-Factory)** ≥ 0.9 — fine-tuning & prediction (optional: `pip install -e ".[train]"`)
+- **matplotlib** ≥ 3.5 — XAI attention heatmaps (optional: `pip install -e ".[xai]"`)
 
 ## License
 
