@@ -174,6 +174,14 @@ def _save_heatmap(sample_explanations: list[dict], output_path: str) -> bool:
     return True
 
 
+def _skip_result(reason: str) -> dict:
+    """Build a standard skip/failure return dict for run_xai."""
+    return {
+        "xai_report_path": "",
+        "messages": [HumanMessage(content=f"[run_xai] {reason}")],
+    }
+
+
 def run_xai(state: PipelineState) -> dict:
     """Generate attention-based token-level explanations for test predictions.
 
@@ -187,48 +195,24 @@ def run_xai(state: PipelineState) -> dict:
     adapter_path = state.get("adapter_path", "")
     if not adapter_path or not Path(adapter_path).exists():
         logger.warning("Adapter not found at %s — skipping XAI.", adapter_path)
-        return {
-            "xai_report_path": "",
-            "messages": [
-                HumanMessage(
-                    content="[run_xai] SKIPPED — adapter not found."
-                ),
-            ],
-        }
+        return _skip_result("SKIPPED — adapter not found.")
 
     if not state.get("finetune_succeeded", False):
         logger.warning("Fine-tuning did not succeed — skipping XAI.")
-        return {
-            "xai_report_path": "",
-            "messages": [
-                HumanMessage(
-                    content="[run_xai] SKIPPED — fine-tuning did not succeed."
-                ),
-            ],
-        }
+        return _skip_result("SKIPPED — fine-tuning did not succeed.")
 
     # ── Load test data ─────────────────────────────────────────
     test_data_path = state.get("test_data_path", "")
     if not test_data_path or not Path(test_data_path).exists():
         logger.warning("Test data not found — skipping XAI.")
-        return {
-            "xai_report_path": "",
-            "messages": [
-                HumanMessage(content="[run_xai] SKIPPED — test data not found."),
-            ],
-        }
+        return _skip_result("SKIPPED — test data not found.")
 
     with open(test_data_path) as f:
         test_data = json.load(f)
 
     if not test_data:
         logger.warning("Test data is empty — skipping XAI.")
-        return {
-            "xai_report_path": "",
-            "messages": [
-                HumanMessage(content="[run_xai] SKIPPED — test data is empty."),
-            ],
-        }
+        return _skip_result("SKIPPED — test data is empty.")
 
     # Limit samples
     samples = test_data[:_MAX_SAMPLES]
@@ -250,14 +234,7 @@ def run_xai(state: PipelineState) -> dict:
         )
     except Exception as exc:
         logger.exception("Failed to load model for XAI")
-        return {
-            "xai_report_path": "",
-            "messages": [
-                HumanMessage(
-                    content=f"[run_xai] FAILED — could not load model: {exc}"
-                ),
-            ],
-        }
+        return _skip_result(f"FAILED — could not load model: {exc}")
 
     device = next(model.parameters()).device.type
 
@@ -285,17 +262,13 @@ def run_xai(state: PipelineState) -> dict:
             print(f"  Explained {i + 1}/{len(samples)} samples", flush=True)
 
     # ── Unload model ───────────────────────────────────────────
-    del model
-    del tokenizer
+    del model, tokenizer
     gc.collect()
-
     try:
         import torch
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-    except ImportError:
+        torch.cuda.empty_cache()
+    except (ImportError, RuntimeError):
         pass
-
     print("✓ Model unloaded, GPU memory freed\n", flush=True)
 
     # ── Build report ───────────────────────────────────────────

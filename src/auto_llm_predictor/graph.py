@@ -116,18 +116,13 @@ def build_graph(
     def check_start_from(state: PipelineState) -> str:
         """Route to the requested starting step."""
         target = state.get("start_from", "explore_data")
-        _VALID = {
-            "explore_data", "review_prep", "split", "config",
+        routes = {
+            "explore_data": "explore_data",
+            "review_prep": "review_prep_data",
+            "split": "split_data",
+            "config": "generate_lmf_config",
         }
-        if target not in _VALID:
-            return "explore_data"
-        if target == "review_prep":
-            return "review_prep_data"
-        if target == "split":
-            return "split_data"
-        if target == "config":
-            return "generate_lmf_config"
-        return "explore_data"
+        return routes.get(target, "explore_data")
 
     graph.add_node("route_start", route_start)
 
@@ -171,7 +166,6 @@ def build_graph(
             "generate_lmf_config": "generate_lmf_config",
         },
     )
-
 
     # Conditional: high-dimensional data gets ensemble feature selection
     graph.add_conditional_edges(

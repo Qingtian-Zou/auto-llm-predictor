@@ -30,7 +30,7 @@ def _sample_jsonl(file_path: Path, num_samples: int = 3) -> str:
         samples = random.sample(data, min(len(data), num_samples))
         return json.dumps(samples, indent=2)
     except Exception as e:
-        logger.warning(f"Failed to read samples from {file_path}: {e}")
+        logger.warning("Failed to read samples from %s: %s", file_path, e)
         return f"Error reading file: {e}"
 
 

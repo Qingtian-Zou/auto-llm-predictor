@@ -30,6 +30,26 @@ from auto_llm_predictor.checkpoint import load_state
 from auto_llm_predictor.graph import build_graph
 
 
+def _build_training_config(args) -> dict:
+    """Build the training_config dict from parsed CLI arguments."""
+    return {
+        "lora_rank": args.lora_rank,
+        "lora_alpha": args.lora_alpha,
+        "use_dora": args.use_dora,
+        "cutoff_len": args.cutoff_len,
+        "num_train_epochs": args.epochs,
+        "learning_rate": args.learning_rate,
+        "per_device_train_batch_size": args.batch_size,
+        "gradient_accumulation_steps": args.grad_accumulation,
+        "logging_steps": args.logging_steps,
+        "save_steps": args.save_steps,
+        "quantization_bit": args.quantization_bit,
+        "flash_attn": args.flash_attn,
+        "precision": args.precision,
+        "test_ratio": args.test_ratio,
+    }
+
+
 def main():
     # Load .env from project root (or current directory)
     load_dotenv()
@@ -183,6 +203,8 @@ Examples:
     )
 
     # ── Build initial state ─────────────────────────────────────
+    training_config = _build_training_config(args)
+
     if args.start_from:
         # Resume mode: load saved state, override with CLI args
         try:
@@ -199,24 +221,8 @@ Examples:
         initial_state["xai_enabled"] = args.xai
 
         # Merge CLI training_config overrides into the saved state
-        cli_config = {
-            "lora_rank": args.lora_rank,
-            "lora_alpha": args.lora_alpha,
-            "use_dora": args.use_dora,
-            "cutoff_len": args.cutoff_len,
-            "num_train_epochs": args.epochs,
-            "learning_rate": args.learning_rate,
-            "per_device_train_batch_size": args.batch_size,
-            "gradient_accumulation_steps": args.grad_accumulation,
-            "logging_steps": args.logging_steps,
-            "save_steps": args.save_steps,
-            "quantization_bit": args.quantization_bit,
-            "flash_attn": args.flash_attn,
-            "precision": args.precision,
-            "test_ratio": args.test_ratio,
-        }
         saved_config = initial_state.get("training_config", {})
-        saved_config.update(cli_config)
+        saved_config.update(training_config)
         initial_state["training_config"] = saved_config
 
         print(f"Resuming from: {args.start_from}")
@@ -232,22 +238,7 @@ Examples:
             "prep_attempts": 0,
             "auto_cutoff": args.auto_cutoff,
             "xai_enabled": args.xai,
-            "training_config": {
-                "lora_rank": args.lora_rank,
-                "lora_alpha": args.lora_alpha,
-                "use_dora": args.use_dora,
-                "cutoff_len": args.cutoff_len,
-                "num_train_epochs": args.epochs,
-                "learning_rate": args.learning_rate,
-                "per_device_train_batch_size": args.batch_size,
-                "gradient_accumulation_steps": args.grad_accumulation,
-                "logging_steps": args.logging_steps,
-                "save_steps": args.save_steps,
-                "quantization_bit": args.quantization_bit,
-                "flash_attn": args.flash_attn,
-                "precision": args.precision,
-                "test_ratio": args.test_ratio,
-            },
+            "training_config": training_config,
         }
 
     # Thread config for checkpointer (required for interrupt/resume)

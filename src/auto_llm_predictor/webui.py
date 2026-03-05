@@ -290,6 +290,8 @@ def create_app() -> FastAPI:
         xai: bool = Form(False),
     ):
         from auto_llm_predictor.graph import build_graph
+        from auto_llm_predictor.main import _build_training_config
+        from types import SimpleNamespace
 
         # Resolve env defaults
         load_dotenv()
@@ -335,6 +337,15 @@ def create_app() -> FastAPI:
             temperature=agent_temperature,
         )
 
+        hp_args = SimpleNamespace(
+            lora_rank=lora_rank, lora_alpha=lora_alpha, use_dora=use_dora,
+            cutoff_len=cutoff_len, epochs=epochs, learning_rate=learning_rate,
+            batch_size=batch_size, grad_accumulation=grad_accumulation,
+            logging_steps=logging_steps, save_steps=save_steps,
+            quantization_bit=quantization_bit, flash_attn=flash_attn,
+            precision=precision, test_ratio=test_ratio,
+        )
+
         initial_state = {
             "csv_path": str(csv_path),
             "test_csv_path": test_csv_path,
@@ -346,22 +357,7 @@ def create_app() -> FastAPI:
             "prep_attempts": 0,
             "auto_cutoff": auto_cutoff,
             "xai_enabled": xai,
-            "training_config": {
-                "lora_rank": lora_rank,
-                "lora_alpha": lora_alpha,
-                "use_dora": use_dora,
-                "cutoff_len": cutoff_len,
-                "num_train_epochs": epochs,
-                "learning_rate": learning_rate,
-                "per_device_train_batch_size": batch_size,
-                "gradient_accumulation_steps": grad_accumulation,
-                "logging_steps": logging_steps,
-                "save_steps": save_steps,
-                "quantization_bit": quantization_bit,
-                "flash_attn": flash_attn,
-                "precision": precision,
-                "test_ratio": test_ratio,
-            },
+            "training_config": _build_training_config(hp_args),
         }
 
         loop = asyncio.get_event_loop()
