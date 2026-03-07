@@ -141,7 +141,7 @@ class PipelineState(TypedDict):
 
     # ── Explainability (XAI) ──────────────────────────────────────
     xai_enabled: bool
-    """Whether to run attention-based XAI after evaluation (--xai flag)."""
+    """Whether to run XAI explanations after evaluation (--xai flag)."""
 
     xai_report_path: str
     """Path to the generated XAI explanation report (JSON)."""

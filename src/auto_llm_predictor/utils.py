@@ -114,17 +114,21 @@ def run_llamafactory(
 
     Returns (success, output_tail).  Timeout defaults to 2 hours.
     """
+    import os
     import sys
     import threading
     from collections import deque
 
     cmd = ["llamafactory-cli", "train", str(yaml_path)]
 
+    # Disable Weights & Biases so no remote API key is required
+    env = {**os.environ, "WANDB_DISABLED": "true"}
+
     if not stream:
         # Simple buffered mode (for short tasks or testing)
         try:
             result = subprocess.run(
-                cmd, capture_output=True, text=True, timeout=timeout,
+                cmd, capture_output=True, text=True, timeout=timeout, env=env,
             )
             output = result.stdout[-tail_chars:] if len(result.stdout) > tail_chars else result.stdout
             if result.stderr:
@@ -160,6 +164,7 @@ def run_llamafactory(
             stderr=subprocess.PIPE,
             text=True,
             bufsize=1,  # line-buffered
+            env=env,
         )
 
         # Read stdout and stderr in parallel threads

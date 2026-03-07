@@ -29,6 +29,8 @@ webui = [
     "python-multipart>=0.0.7",
 ]
 xai = [
+    "shap>=0.42",
+    "transformer-lens>=2.0",
     "matplotlib>=3.5",
 ]
 

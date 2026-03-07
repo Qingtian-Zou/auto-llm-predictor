@@ -73,7 +73,7 @@ graph TD
 | **run_finetuning** | Executes `llamafactory-cli train` (output streamed live) |
 | **run_prediction** | Runs prediction on train and test splits (output streamed live) |
 | **run_evaluation** | Computes accuracy, F1, confusion matrix via scikit-learn |
-| **run_xai** | *(optional, `--xai`)* **[NEW]** Loads fine-tuned model, extracts attention weights per test sample, and produces a token-level explanation report + heatmap |
+| **run_xai** | *(optional, `--xai`)* Generates token-level explanations using SHAP, TransformerLens logit attribution, or attention (fallback). Merges LoRA adapter and runs all available methods |
 
 ## Installation
 
@@ -351,7 +351,7 @@ src/auto_llm_predictor/
     ├── finetune.py             # Runs llamafactory-cli train
     ├── predict.py              # Runs prediction on train/test
     ├── evaluate.py              # Robust classification metrics (handles raw strings)
-    ├── explain.py               # Attention-based XAI explanations (optional)
+    ├── explain.py               # XAI: SHAP + TransformerLens + attention fallback
 ```
 
 ## Dependencies
@@ -366,7 +366,7 @@ src/auto_llm_predictor/
 - **typing-extensions** ≥ 4.0 — type annotations
 - **fastapi, uvicorn, python-multipart** — Web UI dependencies
 - **[LlamaFactory](https://github.com/hiyouga/LLaMA-Factory)** ≥ 0.9 — fine-tuning & prediction (optional: `pip install -e ".[train]"`)
-- **matplotlib** ≥ 3.5 — XAI attention heatmaps (optional: `pip install -e ".[xai]"`)
+- **shap** ≥ 0.42, **transformer-lens** ≥ 2.0, **matplotlib** ≥ 3.5 — XAI explanations (optional: `pip install -e ".[xai]"`)
 
 ## License
 
