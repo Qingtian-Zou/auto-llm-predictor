@@ -37,3 +37,4 @@ xai = [
 [project.scripts]
 auto-llm-predictor = "auto_llm_predictor.main:main"
 auto-llm-predictor-webui = "auto_llm_predictor.webui:main"
+auto-llm-predictor-infer = "auto_llm_predictor.inference:main"

@@ -72,7 +72,12 @@ _OUTPUT_WITH_TEST = """\
 
 CODEGEN_RETRY_CONTEXT = """\
 === PREVIOUS ATTEMPT FAILED ===
-The previous script failed with this error:
+The previous script was:
+```python
+{previous_code}
+```
+
+It failed with this error:
 {error}
 
 Fix the issues and generate a corrected script.
@@ -101,12 +106,15 @@ def format_codegen_prompt(
     output_data_dir: str,
     test_csv_path: str = "",
     previous_error: str = "",
+    previous_code: str = "",
     user_feedback: str = "",
 ) -> str:
     """Format the user prompt for the codegen node."""
     error_context = ""
     if previous_error:
-        error_context = CODEGEN_RETRY_CONTEXT.format(error=previous_error)
+        error_context = CODEGEN_RETRY_CONTEXT.format(
+            previous_code=previous_code, error=previous_error,
+        )
 
     user_feedback_context = ""
     if user_feedback:

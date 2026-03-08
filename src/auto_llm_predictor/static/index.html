@@ -12,7 +12,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=3">
+    <link rel="stylesheet" href="/static/style.css?v=6">
 </head>
 
 <body>
@@ -33,298 +33,491 @@
         <span class="header__tag">WebUI</span>
     </header>
 
+    <!-- ── Tab Bar ──────────────────────────────────── -->
+    <nav class="tab-bar" id="tab-bar">
+        <button class="tab tab--active" data-tab="training">Training</button>
+        <button class="tab" data-tab="inference">Inference</button>
+    </nav>
+
     <!-- ── Main layout ───────────────────────────────── -->
     <main class="main">
-        <!-- LEFT: Config Panel -->
-        <section id="config-panel" class="panel config-panel">
-            <h2 class="panel__title">
-                <span class="panel__dot"></span>
-                Configuration
-            </h2>
+        <!-- ======================================================
+             TRAINING TAB
+             ====================================================== -->
+        <div class="tab-content tab-content--active" id="tab-training">
+            <!-- LEFT: Config Panel -->
+            <section id="config-panel" class="panel config-panel">
+                <h2 class="panel__title">
+                    <span class="panel__dot"></span>
+                    Configuration
+                </h2>
 
-            <form id="run-form" class="form" enctype="multipart/form-data">
-                <!-- Dataset -->
-                <fieldset class="form__group">
-                    <legend class="form__legend">Dataset</legend>
-                    <label class="form__label" for="csv-file">CSV File <span class="req">*</span></label>
-                    <div class="file-drop" id="file-drop">
-                        <input type="file" id="csv-file" name="csv_file" accept=".csv" required>
-                        <div class="file-drop__text">
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32"
-                                height="32">
-                                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                                <polyline points="14 2 14 8 20 8" />
-                            </svg>
-                            <span>Drop CSV file or <em>browse</em></span>
+                <form id="run-form" class="form" enctype="multipart/form-data">
+                    <!-- Dataset -->
+                    <fieldset class="form__group">
+                        <legend class="form__legend">Dataset</legend>
+                        <label class="form__label" for="csv-file">CSV File <span class="req">*</span></label>
+                        <div class="file-drop" id="file-drop">
+                            <input type="file" id="csv-file" name="csv_file" accept=".csv" required>
+                            <div class="file-drop__text">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" width="32"
+                                    height="32">
+                                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                    <polyline points="14 2 14 8 20 8" />
+                                </svg>
+                                <span>Drop CSV file or <em>browse</em></span>
+                            </div>
+                            <div class="file-drop__name" id="file-name"></div>
                         </div>
-                        <div class="file-drop__name" id="file-name"></div>
-                    </div>
 
-                    <label class="form__label" for="test-csv-file">Test CSV <span
-                            class="form__optional">(optional)</span></label>
-                    <div class="file-drop file-drop--sm" id="test-file-drop">
-                        <input type="file" id="test-csv-file" name="test_csv_file" accept=".csv">
-                        <div class="file-drop__text">
-                            <span>Drop test CSV or <em>browse</em></span>
+                        <label class="form__label" for="test-csv-file">Test CSV <span
+                                class="form__optional">(optional)</span></label>
+                        <div class="file-drop file-drop--sm" id="test-file-drop">
+                            <input type="file" id="test-csv-file" name="test_csv_file" accept=".csv">
+                            <div class="file-drop__text">
+                                <span>Drop test CSV or <em>browse</em></span>
+                            </div>
+                            <div class="file-drop__name" id="test-file-name"></div>
                         </div>
-                        <div class="file-drop__name" id="test-file-name"></div>
-                    </div>
 
-                    <label class="form__label" for="target">Target Column</label>
-                    <input type="text" id="target" name="target" placeholder="(auto-detect)" class="form__input">
+                        <label class="form__label" for="target">Target Column</label>
+                        <input type="text" id="target" name="target" placeholder="(auto-detect)" class="form__input">
 
-                    <label class="form__label" for="output">Output Directory</label>
-                    <input type="text" id="output" name="output" placeholder="output/<csv_stem>" class="form__input">
+                        <label class="form__label" for="output">Output Directory</label>
+                        <input type="text" id="output" name="output" placeholder="output/<csv_stem>"
+                            class="form__input">
 
-                    <label class="form__label" for="test-ratio">Test Ratio <span class="form__optional">(ignored if test
-                            CSV set)</span></label>
-                    <input type="number" id="test-ratio" name="test_ratio" value="0.2" step="0.05" min="0.05" max="0.95"
-                        class="form__input form__input--sm">
-                </fieldset>
+                        <label class="form__label" for="test-ratio">Test Ratio <span class="form__optional">(ignored if
+                                test
+                                CSV set)</span></label>
+                        <input type="number" id="test-ratio" name="test_ratio" value="0.2" step="0.05" min="0.05"
+                            max="0.95" class="form__input form__input--sm">
+                    </fieldset>
 
-                <!-- Model -->
-                <fieldset class="form__group">
-                    <legend class="form__legend">Model</legend>
-                    <label class="form__label" for="model">HuggingFace Model ID <span class="req">*</span></label>
-                    <input type="text" id="model" name="model" value="mistralai/Mistral-7B-Instruct-v0.3"
-                        placeholder="mistralai/Mistral-7B-Instruct-v0.3" required class="form__input">
-                </fieldset>
+                    <!-- Model -->
+                    <fieldset class="form__group">
+                        <legend class="form__legend">Model</legend>
+                        <label class="form__label" for="model">HuggingFace Model ID <span class="req">*</span></label>
+                        <input type="text" id="model" name="model" value="mistralai/Mistral-7B-Instruct-v0.3"
+                            placeholder="mistralai/Mistral-7B-Instruct-v0.3" required class="form__input">
+                    </fieldset>
 
-                <!-- Agent LLM (collapsible) -->
-                <details class="form__group form__details">
-                    <summary class="form__legend form__legend--click">Agent LLM<span class="chevron">›</span></summary>
-                    <p class="form__hint">Leave blank to use <code>.env</code> defaults.</p>
-                    <label class="form__label" for="agent-api-base">API Base</label>
-                    <input type="text" id="agent-api-base" name="agent_api_base" placeholder="from .env"
-                        class="form__input">
-                    <label class="form__label" for="agent-api-key">API Key</label>
-                    <input type="password" id="agent-api-key" name="agent_api_key" placeholder="from .env"
-                        class="form__input">
-                    <label class="form__label" for="agent-model">Agent Model</label>
-                    <input type="text" id="agent-model" name="agent_model" placeholder="from .env" class="form__input">
-                    <label class="form__label" for="coder-model">Coder Model</label>
-                    <input type="text" id="coder-model" name="coder_model" placeholder="from .env" class="form__input">
-                    <label class="form__label" for="agent-temperature">Temperature</label>
-                    <input type="number" id="agent-temperature" name="agent_temperature" value="0.2" step="0.05" min="0"
-                        max="2" class="form__input form__input--sm">
-                </details>
+                    <!-- Agent LLM (collapsible) -->
+                    <details class="form__group form__details">
+                        <summary class="form__legend form__legend--click">Agent LLM
+                            <span class="tooltip-wrap">
+                                <span class="tooltip-icon">i</span>
+                                <span class="tooltip-text">Leave blank to use <code>.env</code> defaults.</span>
+                            </span>
+                            <span class="chevron">›</span>
+                        </summary>
+                        <label class="form__label" for="agent-api-base">API Base</label>
+                        <input type="text" id="agent-api-base" name="agent_api_base" placeholder="from .env"
+                            class="form__input">
+                        <label class="form__label" for="agent-api-key">API Key</label>
+                        <input type="password" id="agent-api-key" name="agent_api_key" placeholder="from .env"
+                            class="form__input">
+                        <label class="form__label" for="agent-model">Agent Model</label>
+                        <input type="text" id="agent-model" name="agent_model" placeholder="from .env"
+                            class="form__input">
+                        <label class="form__label" for="coder-model">Coder Model</label>
+                        <input type="text" id="coder-model" name="coder_model" placeholder="from .env"
+                            class="form__input">
+                        <label class="form__label" for="agent-temperature">Temperature</label>
+                        <input type="number" id="agent-temperature" name="agent_temperature" value="0.2" step="0.05"
+                            min="0" max="2" class="form__input form__input--sm">
+                    </details>
 
-                <!-- Hyperparameters (collapsible) -->
-                <details class="form__group form__details">
-                    <summary class="form__legend form__legend--click">Training Hyperparameters<span
-                            class="chevron">›</span></summary>
-                    <div class="form__grid">
-                        <div>
-                            <label class="form__label" for="lora-rank">LoRA Rank</label>
-                            <input type="number" id="lora-rank" name="lora_rank" value="64"
-                                class="form__input form__input--sm">
+                    <!-- Hyperparameters (collapsible) -->
+                    <details class="form__group form__details">
+                        <summary class="form__legend form__legend--click">Training Hyperparameters<span
+                                class="chevron">›</span></summary>
+                        <div class="form__grid">
+                            <div>
+                                <label class="form__label" for="lora-rank">LoRA Rank</label>
+                                <input type="number" id="lora-rank" name="lora_rank" value="64"
+                                    class="form__input form__input--sm">
+                            </div>
+                            <div>
+                                <label class="form__label" for="lora-alpha">LoRA Alpha</label>
+                                <input type="number" id="lora-alpha" name="lora_alpha" value="128"
+                                    class="form__input form__input--sm">
+                            </div>
+                            <div>
+                                <label class="form__label" for="cutoff-len">Cutoff Length
+                                    <span class="tooltip-wrap">
+                                        <span class="tooltip-icon">i</span>
+                                        <span class="tooltip-text">Ignored when Auto Cutoff is enabled.</span>
+                                    </span>
+                                </label>
+                                <input type="number" id="cutoff-len" name="cutoff_len" value="4096"
+                                    class="form__input form__input--sm">
+                            </div>
+                            <div class="form__checkbox-row">
+                                <input type="checkbox" id="auto-cutoff" name="auto_cutoff">
+                                <label for="auto-cutoff">Auto Cutoff <span class="form__optional">(detect from
+                                        data)</span></label>
+                            </div>
+                            <div>
+                                <label class="form__label" for="epochs">Epochs</label>
+                                <input type="number" id="epochs" name="epochs" value="3.0" step="0.5"
+                                    class="form__input form__input--sm">
+                            </div>
+                            <div>
+                                <label class="form__label" for="learning-rate">Learning Rate</label>
+                                <input type="text" id="learning-rate" name="learning_rate" value="2.0e-5"
+                                    class="form__input form__input--sm">
+                            </div>
+                            <div>
+                                <label class="form__label" for="batch-size">Batch Size</label>
+                                <input type="number" id="batch-size" name="batch_size" value="1"
+                                    class="form__input form__input--sm">
+                            </div>
+                            <div>
+                                <label class="form__label" for="grad-accumulation">Grad Accum</label>
+                                <input type="number" id="grad-accumulation" name="grad_accumulation" value="16"
+                                    class="form__input form__input--sm">
+                            </div>
+                            <div>
+                                <label class="form__label" for="precision">Precision</label>
+                                <select id="precision" name="precision" class="form__input form__input--sm">
+                                    <option value="bf16" selected>bf16</option>
+                                    <option value="fp16">fp16</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form__label" for="flash-attn">Flash Attn</label>
+                                <select id="flash-attn" name="flash_attn" class="form__input form__input--sm">
+                                    <option value="auto" selected>auto</option>
+                                    <option value="fa2">fa2</option>
+                                    <option value="disabled">disabled</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form__label" for="logging-steps">Log Steps</label>
+                                <input type="number" id="logging-steps" name="logging_steps" value="10"
+                                    class="form__input form__input--sm">
+                            </div>
+                            <div>
+                                <label class="form__label" for="save-steps">Save Steps</label>
+                                <input type="number" id="save-steps" name="save_steps" value="500"
+                                    class="form__input form__input--sm">
+                            </div>
+                            <div class="form__checkbox-row">
+                                <input type="checkbox" id="use-dora" name="use_dora">
+                                <label for="use-dora">Enable DoRA</label>
+                            </div>
                         </div>
-                        <div>
-                            <label class="form__label" for="lora-alpha">LoRA Alpha</label>
-                            <input type="number" id="lora-alpha" name="lora_alpha" value="128"
-                                class="form__input form__input--sm">
-                        </div>
-                        <div>
-                            <label class="form__label" for="cutoff-len">Cutoff Length</label>
-                            <input type="number" id="cutoff-len" name="cutoff_len" value="4096"
-                                class="form__input form__input--sm">
-                            <p class="form__hint">Ignored when Auto Cutoff is enabled.</p>
-                        </div>
-                        <div class="form__checkbox-row">
-                            <input type="checkbox" id="auto-cutoff" name="auto_cutoff">
-                            <label for="auto-cutoff">Auto Cutoff <span class="form__optional">(detect from
-                                    data)</span></label>
-                        </div>
-                        <div>
-                            <label class="form__label" for="epochs">Epochs</label>
-                            <input type="number" id="epochs" name="epochs" value="3.0" step="0.5"
-                                class="form__input form__input--sm">
-                        </div>
-                        <div>
-                            <label class="form__label" for="learning-rate">Learning Rate</label>
-                            <input type="text" id="learning-rate" name="learning_rate" value="2.0e-5"
-                                class="form__input form__input--sm">
-                        </div>
-                        <div>
-                            <label class="form__label" for="batch-size">Batch Size</label>
-                            <input type="number" id="batch-size" name="batch_size" value="1"
-                                class="form__input form__input--sm">
-                        </div>
-                        <div>
-                            <label class="form__label" for="grad-accumulation">Grad Accum</label>
-                            <input type="number" id="grad-accumulation" name="grad_accumulation" value="16"
-                                class="form__input form__input--sm">
-                        </div>
-                        <div>
-                            <label class="form__label" for="precision">Precision</label>
-                            <select id="precision" name="precision" class="form__input form__input--sm">
-                                <option value="bf16" selected>bf16</option>
-                                <option value="fp16">fp16</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="form__label" for="flash-attn">Flash Attn</label>
-                            <select id="flash-attn" name="flash_attn" class="form__input form__input--sm">
-                                <option value="auto" selected>auto</option>
-                                <option value="fa2">fa2</option>
-                                <option value="disabled">disabled</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="form__label" for="logging-steps">Log Steps</label>
-                            <input type="number" id="logging-steps" name="logging_steps" value="10"
-                                class="form__input form__input--sm">
-                        </div>
-                        <div>
-                            <label class="form__label" for="save-steps">Save Steps</label>
-                            <input type="number" id="save-steps" name="save_steps" value="500"
-                                class="form__input form__input--sm">
-                        </div>
-                        <div class="form__checkbox-row">
-                            <input type="checkbox" id="use-dora" name="use_dora">
-                            <label for="use-dora">Enable DoRA</label>
-                        </div>
-                        <div class="form__checkbox-row">
+                    </details>
+
+                    <!-- Optional Steps (collapsible) -->
+                    <details class="form__group form__details">
+                        <summary class="form__legend form__legend--click">Optional Steps<span class="chevron">›</span></summary>
+                        <div class="form__checkbox-row" style="margin-top: 4px;">
                             <input type="checkbox" id="xai" name="xai">
-                            <label for="xai">Enable XAI <span class="form__optional">(attention-based explanations)</span></label>
+                            <label for="xai">Enable XAI
+                                <span class="tooltip-wrap">
+                                    <span class="tooltip-icon">i</span>
+                                    <span class="tooltip-text">Run attention-based token-level explanations after training.</span>
+                                </span>
+                            </label>
                         </div>
-                    </div>
-                </details>
+                    </details>
 
-                <div class="form__actions">
-                    <button type="submit" id="run-btn" class="btn btn--primary">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18"
-                            height="18">
-                            <polygon points="5 3 19 12 5 21 5 3" />
-                        </svg>
-                        Start Pipeline
-                    </button>
-                    <button type="button" id="cancel-btn" class="btn btn--danger btn--hidden">
-                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18"
-                            height="18">
-                            <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
-                            <line x1="9" y1="9" x2="15" y2="15" />
-                            <line x1="15" y1="9" x2="9" y2="15" />
-                        </svg>
-                        Cancel
-                    </button>
-                </div>
-            </form>
-        </section>
-
-        <!-- RIGHT: Pipeline & Log -->
-        <section class="panel output-panel">
-            <!-- Pipeline progress -->
-            <div id="pipeline-section" class="pipeline-section">
-                <div class="panel__heading-row">
-                    <h2 class="panel__title">
-                        <span class="panel__dot panel__dot--blue"></span>
-                        Pipeline
-                    </h2>
-                    <div class="dropdown">
-                        <button type="button" id="export-btn" class="btn btn--sm dropdown__toggle" disabled>
-                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14"
-                                height="14">
-                                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                                <polyline points="7 10 12 15 17 10" />
-                                <line x1="12" y1="15" x2="12" y2="3" />
+                    <div class="form__actions">
+                        <button type="submit" id="run-btn" class="btn btn--primary">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18"
+                                height="18">
+                                <polygon points="5 3 19 12 5 21 5 3" />
                             </svg>
-                            Export
+                            Start Pipeline
                         </button>
-                        <div id="export-menu" class="dropdown__menu dropdown__menu--hidden">
-                            <!-- Artifact links will be injected here -->
-                        </div>
-                    </div>
-                </div>
-                <div id="pipeline-steps" class="steps">
-                    <div class="step" data-step="explore_data"><span class="step__dot"></span><span
-                            class="step__label">Explore Data</span></div>
-                    <div class="step" data-step="select_features"><span class="step__dot"></span><span
-                            class="step__label">Select Features</span></div>
-                    <div class="step" data-step="plan_preparation"><span class="step__dot"></span><span
-                            class="step__label">Plan Prep</span></div>
-                    <div class="step" data-step="review_prep_plan"><span class="step__dot"></span><span
-                            class="step__label">Review Plan</span></div>
-                    <div class="step" data-step="write_prep_code"><span class="step__dot"></span><span
-                            class="step__label">Write Code</span></div>
-                    <div class="step" data-step="execute_prep_code"><span class="step__dot"></span><span
-                            class="step__label">Execute Code</span></div>
-                    <div class="step" data-step="verify_prepared_data"><span class="step__dot"></span><span
-                            class="step__label">Verify Data</span></div>
-                    <div class="step" data-step="review_prep_data"><span class="step__dot"></span><span
-                            class="step__label">Review Data</span></div>
-                    <div class="step" data-step="write_balance_code"><span class="step__dot"></span><span
-                            class="step__label">Write Balance</span></div>
-                    <div class="step" data-step="execute_balance_code"><span class="step__dot"></span><span
-                            class="step__label">Execute Balance</span></div>
-                    <div class="step" data-step="review_balanced_data"><span class="step__dot"></span><span
-                            class="step__label">Review Balanced</span></div>
-                    <div class="step" data-step="split_data"><span class="step__dot"></span><span
-                            class="step__label">Split Data</span></div>
-                    <div class="step" data-step="determine_cutoff_len"><span class="step__dot"></span><span
-                            class="step__label">Cutoff Length</span></div>
-                    <div class="step" data-step="generate_lmf_config"><span class="step__dot"></span><span
-                            class="step__label">Gen Config</span></div>
-                    <div class="step" data-step="review_lmf_config"><span class="step__dot"></span><span
-                            class="step__label">Review Config</span></div>
-                    <div class="step" data-step="run_finetuning"><span class="step__dot"></span><span
-                            class="step__label">Fine-tune</span></div>
-                    <div class="step" data-step="run_prediction"><span class="step__dot"></span><span
-                            class="step__label">Predict</span></div>
-                    <div class="step" data-step="run_evaluation"><span class="step__dot"></span><span
-                            class="step__label">Evaluate</span></div>
-                    <div class="step" data-step="run_xai"><span class="step__dot"></span><span
-                            class="step__label">XAI</span></div>
-                </div>
-            </div>
-
-            <!-- Review panel (hidden until interrupt) -->
-            <div id="review-panel" class="review-panel review-panel--hidden">
-                <h3 class="review-panel__title">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-                        <circle cx="12" cy="12" r="10" />
-                        <line x1="12" y1="8" x2="12" y2="12" />
-                        <line x1="12" y1="16" x2="12.01" y2="16" />
-                    </svg>
-                    <span id="review-panel-label">Review Checkpoint</span>
-                </h3>
-                <pre id="review-summary" class="review-panel__summary"></pre>
-                <!-- Editable plan (for review_prep_plan only) -->
-                <textarea id="plan-editor" class="review-panel__editor review-panel__editor--hidden" rows="18"
-                    spellcheck="false"></textarea>
-                <form id="review-form" class="review-panel__form">
-                    <input type="text" id="review-input" class="form__input" placeholder="approve  /  your feedback...">
-                    <div class="review-panel__actions">
-                        <button type="button" id="approve-btn" class="btn btn--approve">✓ Approve</button>
-                        <button type="button" id="save-plan-btn" class="btn btn--send btn--hidden">💾 Save Plan</button>
-                        <button type="submit" id="send-btn" class="btn btn--send">Send Feedback</button>
+                        <button type="button" id="cancel-btn" class="btn btn--danger btn--hidden">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18"
+                                height="18">
+                                <rect x="3" y="3" width="18" height="18" rx="2" ry="2" />
+                                <line x1="9" y1="9" x2="15" y2="15" />
+                                <line x1="15" y1="9" x2="9" y2="15" />
+                            </svg>
+                            Cancel
+                        </button>
                     </div>
                 </form>
-            </div>
+            </section>
 
-            <!-- Results panel (hidden until complete) -->
-            <div id="results-panel" class="results-panel results-panel--hidden">
-                <h3 class="results-panel__title">
-                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20" height="20">
-                        <polyline points="20 6 9 17 4 12" />
-                    </svg>
-                    Results
-                </h3>
-                <div id="results-content" class="results-panel__content"></div>
-            </div>
+            <!-- RIGHT: Pipeline & Log -->
+            <section class="panel output-panel">
+                <!-- Pipeline progress -->
+                <div id="pipeline-section" class="pipeline-section">
+                    <div class="panel__heading-row">
+                        <h2 class="panel__title">
+                            <span class="panel__dot panel__dot--blue"></span>
+                            Pipeline
+                        </h2>
+                        <div class="dropdown">
+                            <button type="button" id="export-btn" class="btn btn--sm dropdown__toggle" disabled>
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="14"
+                                    height="14">
+                                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                                    <polyline points="7 10 12 15 17 10" />
+                                    <line x1="12" y1="15" x2="12" y2="3" />
+                                </svg>
+                                Export
+                            </button>
+                            <div id="export-menu" class="dropdown__menu dropdown__menu--hidden">
+                                <!-- Artifact links will be injected here -->
+                            </div>
+                        </div>
+                    </div>
+                    <div id="pipeline-steps" class="steps">
+                        <div class="step" data-step="explore_data"><span class="step__dot"></span><span
+                                class="step__label">Explore Data</span></div>
+                        <div class="step" data-step="select_features"><span class="step__dot"></span><span
+                                class="step__label">Select Features</span></div>
+                        <div class="step" data-step="plan_preparation"><span class="step__dot"></span><span
+                                class="step__label">Plan Prep</span></div>
+                        <div class="step" data-step="review_prep_plan"><span class="step__dot"></span><span
+                                class="step__label">Review Plan</span></div>
+                        <div class="step" data-step="write_prep_code"><span class="step__dot"></span><span
+                                class="step__label">Write Code</span></div>
+                        <div class="step" data-step="execute_prep_code"><span class="step__dot"></span><span
+                                class="step__label">Execute Code</span></div>
+                        <div class="step" data-step="verify_prepared_data"><span class="step__dot"></span><span
+                                class="step__label">Verify Data</span></div>
+                        <div class="step" data-step="review_prep_data"><span class="step__dot"></span><span
+                                class="step__label">Review Data</span></div>
+                        <div class="step" data-step="write_balance_code"><span class="step__dot"></span><span
+                                class="step__label">Write Balance</span></div>
+                        <div class="step" data-step="execute_balance_code"><span class="step__dot"></span><span
+                                class="step__label">Execute Balance</span></div>
+                        <div class="step" data-step="review_balanced_data"><span class="step__dot"></span><span
+                                class="step__label">Review Balanced</span></div>
+                        <div class="step" data-step="split_data"><span class="step__dot"></span><span
+                                class="step__label">Split Data</span></div>
+                        <div class="step" data-step="determine_cutoff_len"><span class="step__dot"></span><span
+                                class="step__label">Cutoff Length</span></div>
+                        <div class="step" data-step="generate_lmf_config"><span class="step__dot"></span><span
+                                class="step__label">Gen Config</span></div>
+                        <div class="step" data-step="review_lmf_config"><span class="step__dot"></span><span
+                                class="step__label">Review Config</span></div>
+                        <div class="step" data-step="run_finetuning"><span class="step__dot"></span><span
+                                class="step__label">Fine-tune</span></div>
+                        <div class="step" data-step="run_prediction"><span class="step__dot"></span><span
+                                class="step__label">Predict</span></div>
+                        <div class="step" data-step="run_evaluation"><span class="step__dot"></span><span
+                                class="step__label">Evaluate</span></div>
+                        <div class="step" data-step="run_xai"><span class="step__dot"></span><span
+                                class="step__label">XAI</span></div>
+                    </div>
+                </div>
 
-            <!-- Log output -->
-            <div class="log-section">
+                <!-- Review panel (hidden until interrupt) -->
+                <div id="review-panel" class="review-panel review-panel--hidden">
+                    <h3 class="review-panel__title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20"
+                            height="20">
+                            <circle cx="12" cy="12" r="10" />
+                            <line x1="12" y1="8" x2="12" y2="12" />
+                            <line x1="12" y1="16" x2="12.01" y2="16" />
+                        </svg>
+                        <span id="review-panel-label">Review Checkpoint</span>
+                    </h3>
+                    <pre id="review-summary" class="review-panel__summary"></pre>
+                    <!-- Editable plan (for review_prep_plan only) -->
+                    <textarea id="plan-editor" class="review-panel__editor review-panel__editor--hidden" rows="18"
+                        spellcheck="false"></textarea>
+                    <form id="review-form" class="review-panel__form">
+                        <input type="text" id="review-input" class="form__input"
+                            placeholder="approve  /  your feedback...">
+                        <div class="review-panel__actions">
+                            <button type="button" id="approve-btn" class="btn btn--approve">✓ Approve</button>
+                            <button type="button" id="save-plan-btn" class="btn btn--send btn--hidden">💾 Save
+                                Plan</button>
+                            <button type="submit" id="send-btn" class="btn btn--send">Send Feedback</button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Results panel (hidden until complete) -->
+                <div id="results-panel" class="results-panel results-panel--hidden">
+                    <h3 class="results-panel__title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20"
+                            height="20">
+                            <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Results
+                    </h3>
+                    <div id="results-content" class="results-panel__content"></div>
+                </div>
+
+                <!-- Log output -->
+                <div class="log-section">
+                    <h2 class="panel__title">
+                        <span class="panel__dot panel__dot--green"></span>
+                        Live Log
+                    </h2>
+                    <div id="log" class="log"></div>
+                </div>
+            </section>
+        </div>
+
+        <!-- ======================================================
+             INFERENCE TAB
+             ====================================================== -->
+        <div class="tab-content" id="tab-inference">
+            <!-- LEFT: Inference Config Panel -->
+            <section class="panel config-panel">
                 <h2 class="panel__title">
-                    <span class="panel__dot panel__dot--green"></span>
-                    Live Log
+                    <span class="panel__dot"></span>
+                    Inference Configuration
                 </h2>
-                <div id="log" class="log"></div>
-            </div>
-        </section>
+
+                <!-- Shared directory inputs -->
+                <fieldset class="form__group">
+                    <legend class="form__legend">Directories</legend>
+                    <label class="form__label" for="infer-output-dir">Training Output Directory <span
+                            class="req">*</span>
+                        <span class="tooltip-wrap">
+                            <span class="tooltip-icon">i</span>
+                            <span class="tooltip-text">Contains <code>scripts/</code> and <code>.pipeline_state.json</code></span>
+                        </span>
+                    </label>
+                    <input type="text" id="infer-output-dir" placeholder="output/my_dataset" class="form__input"
+                        required>
+
+                    <label class="form__label" for="infer-run-dir">Run Directory <span class="req">*</span>
+                        <span class="tooltip-wrap">
+                            <span class="tooltip-icon">i</span>
+                            <span class="tooltip-text">Contains the LoRA adapter under <code>sft/</code></span>
+                        </span>
+                    </label>
+                    <input type="text" id="infer-run-dir" placeholder="output/my_dataset/run_20260307_120000"
+                        class="form__input" required>
+                </fieldset>
+
+                <!-- Inference mode selector -->
+                <fieldset class="form__group">
+                    <legend class="form__legend">Mode</legend>
+                    <div class="infer-mode-toggle">
+                        <button type="button" class="infer-mode-btn infer-mode-btn--active" id="mode-batch-btn"
+                            data-mode="batch">
+                            📊 Batch Inference
+                        </button>
+                        <button type="button" class="infer-mode-btn" id="mode-single-btn" data-mode="single">
+                            🔍 Single Inference
+                        </button>
+                    </div>
+                </fieldset>
+
+                <!-- Batch inference form -->
+                <div id="infer-batch-panel">
+                    <form id="infer-batch-form" class="form" enctype="multipart/form-data">
+                        <fieldset class="form__group">
+                            <legend class="form__legend">Batch Inference</legend>
+                            <label class="form__label" for="infer-csv-file">CSV File <span class="req">*</span></label>
+                            <div class="file-drop" id="infer-file-drop">
+                                <input type="file" id="infer-csv-file" accept=".csv" required>
+                                <div class="file-drop__text">
+                                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"
+                                        width="32" height="32">
+                                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                                        <polyline points="14 2 14 8 20 8" />
+                                    </svg>
+                                    <span>Drop CSV file for inference or <em>browse</em></span>
+                                </div>
+                                <div class="file-drop__name" id="infer-file-name"></div>
+                            </div>
+                        </fieldset>
+
+                        <div class="form__actions">
+                            <button type="submit" id="infer-batch-btn" class="btn btn--primary">
+                                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18"
+                                    height="18">
+                                    <polygon points="5 3 19 12 5 21 5 3" />
+                                </svg>
+                                Run Batch Inference
+                            </button>
+                        </div>
+                    </form>
+                </div>
+
+                <!-- Single inference form -->
+                <div id="infer-single-panel" class="infer-panel--hidden">
+                    <fieldset class="form__group">
+                        <legend class="form__legend">Single Inference
+                            <span class="tooltip-wrap">
+                                <span class="tooltip-icon">i</span>
+                                <span class="tooltip-text">Load features from the training output to populate input fields.</span>
+                            </span>
+                        </legend>
+                        <div class="form__actions" style="margin-bottom: 12px;">
+                            <button type="button" id="load-features-btn" class="btn btn--sm btn--secondary">
+                                ↻ Load Features
+                            </button>
+                        </div>
+                        <div id="feature-inputs" class="feature-inputs">
+                            <p class="form__hint">Click "Load Features" to populate input fields.</p>
+                        </div>
+
+                        <div class="form__checkbox-row" style="margin-top: 12px;">
+                            <input type="checkbox" id="infer-xai">
+                            <label for="infer-xai">Enable XAI <span class="form__optional">(explanations)</span></label>
+                        </div>
+                    </fieldset>
+
+                    <div class="form__actions">
+                        <button type="button" id="infer-single-btn" class="btn btn--primary" disabled>
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18"
+                                height="18">
+                                <circle cx="11" cy="11" r="8" />
+                                <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                            </svg>
+                            Predict
+                        </button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- RIGHT: Inference Output Panel -->
+            <section class="panel output-panel">
+                <!-- Batch results -->
+                <div id="infer-results-panel" class="results-panel results-panel--hidden">
+                    <h3 class="results-panel__title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20"
+                            height="20">
+                            <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        Inference Results
+                    </h3>
+                    <div id="infer-results-content" class="results-panel__content"></div>
+                </div>
+
+                <!-- Single prediction result -->
+                <div id="single-result-panel" class="results-panel results-panel--hidden">
+                    <h3 class="results-panel__title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20"
+                            height="20">
+                            <circle cx="11" cy="11" r="8" />
+                            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+                        </svg>
+                        Prediction
+                    </h3>
+                    <div id="single-result-content" class="results-panel__content"></div>
+                </div>
+
+                <!-- Inference log -->
+                <div class="log-section">
+                    <h2 class="panel__title">
+                        <span class="panel__dot panel__dot--green"></span>
+                        Inference Log
+                    </h2>
+                    <div id="infer-log" class="log"></div>
+                </div>
+            </section>
+        </div>
     </main>
 
-    <script src="/static/app.js?v=4"></script>
+    <script src="/static/app.js?v=6"></script>
 </body>
 
 </html>

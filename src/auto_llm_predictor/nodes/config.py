@@ -68,6 +68,7 @@ def generate_lmf_config(state: PipelineState) -> dict:
     model = state["base_model"]
     template = _guess_template(model)
     sft_dir = str(run_dir / "sft")
+    sft_logs_dir = str(run_dir / "sft" / "logs")
     predict_train_dir = str(run_dir / "predict_train")
     predict_test_dir = str(run_dir / "predict_test")
 
@@ -118,7 +119,7 @@ preprocessing_num_workers: 16
 
 ### output
 output_dir: {sft_dir}
-logging_dir: {sft_dir}/logs
+logging_dir: {sft_logs_dir}
 logging_steps: {logging_steps}
 save_steps: {save_steps}
 save_strategy: steps

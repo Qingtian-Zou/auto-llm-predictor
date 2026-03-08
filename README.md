@@ -10,12 +10,13 @@ Automatically build a fine-tuned LLM predictor from any CSV dataset. Powered by 
 ## Core Features
 
 - **End-to-End Automation**: From raw CSV profiling to evaluation and explainability.
-- **Explainable AI (XAI)**: **[NEW]** Extract token-level attention scores to see exactly which parts of the input drove a prediction.
+- **Post-Training Inference**: Run batch or interactive single-sample predictions on new data using the trained adapter — via CLI or Web UI.
+- **Explainable AI (XAI)**: Token-level explanations using SHAP, TransformerLens logit attribution, and attention (fallback) — all available methods run automatically.
 - **Smart Data Handling**: Automated feature selection for high-dim data and intelligent class balancing.
 - **Human-in-the-Loop**: Pause at critical checkpoints to override plans, code, or hyperparameters.
-- **Direct Editing**: **[NEW]** Edit JSON preparation plans and LlamaFactory YAML configs inline (CLI or Web UI).
-- **Robustness**: Automated JSON repair and retry-on-failure logic for LLM-generated code.
-- **Web UI**: Modern dashboard with live logging, progress tracking, and artifact exporting.
+- **Direct Editing**: Edit JSON preparation plans and LlamaFactory YAML configs inline (CLI or Web UI).
+- **Robustness**: Automated JSON repair and retry-on-failure logic for LLM-generated code (retry includes the previous failed script for better self-correction).
+- **Web UI**: Modern dashboard with live logging, progress tracking, artifact exporting, and an integrated Inference tab.
 
 ## Pipeline
 
@@ -73,7 +74,7 @@ graph TD
 | **run_finetuning** | Executes `llamafactory-cli train` (output streamed live) |
 | **run_prediction** | Runs prediction on train and test splits (output streamed live) |
 | **run_evaluation** | Computes accuracy, F1, confusion matrix via scikit-learn |
-| **run_xai** | *(optional, `--xai`)* Generates token-level explanations using SHAP, TransformerLens logit attribution, or attention (fallback). Merges LoRA adapter and runs all available methods |
+| **run_xai** | *(optional, `--xai`)* Merges the LoRA adapter and runs token-level explanations in priority order: **SHAP** (Shapley values via text-generation pipeline), **TransformerLens** (logit attribution via residual stream decomposition), **Attention** (fallback, eager-mode last-layer weights). All succeeding methods are saved to a unified JSON report. |
 
 ## Installation
 
@@ -135,6 +136,49 @@ The Web UI provides:
 - **Interactive Reviews**: Pause at checkpoints with dedicated forms for approval or feedback.
 - **Inline Editors**: Direct editing of JSON plans and YAML configs in the browser.
 - **Artifact Export**: One-click download of generated scripts, datasets, and configurations.
+- **Inference Tab**: Run batch inference on new CSV files or interactive single-sample predictions directly from the browser.
+- **Resume on Reload**: Reconnects to an active pipeline run automatically if the page is refreshed.
+
+### Inference
+
+After training completes, use the `auto-llm-predictor-infer` CLI to run predictions on new data without re-running the full pipeline.
+
+```bash
+# Batch inference — process a new CSV through the trained adapter
+auto-llm-predictor-infer \
+    --infer-output-dir output/my_dataset \
+    --infer-run-dir output/my_dataset/run_20260307_120000 \
+    --infer-csv data/new_data.csv
+
+# Interactive single-sample inference
+auto-llm-predictor-infer \
+    --infer-output-dir output/my_dataset \
+    --infer-run-dir output/my_dataset/run_20260307_120000 \
+    --infer-single
+
+# Single inference with XAI token-level explanations
+auto-llm-predictor-infer \
+    --infer-output-dir output/my_dataset \
+    --infer-run-dir output/my_dataset/run_20260307_120000 \
+    --infer-single --infer-xai
+```
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--infer-output-dir` | *(required)* | Training output directory (contains `scripts/` and `.pipeline_state.json`) |
+| `--infer-run-dir` | *(required)* | Training run directory (contains the LoRA adapter under `sft/`) |
+| `--infer-csv` | *(none)* | Path to new CSV for batch inference |
+| `--infer-single` | off | Enter interactive single-sample inference mode |
+| `--infer-output` | `<run_dir>/inference_<timestamp>` | Output directory for batch predictions |
+| `--infer-xai` | off | Run XAI explanations on single prediction (requires `--infer-single`) |
+| `--infer-precision` | `bf16` | Precision (`bf16` or `fp16`) |
+| `--infer-quantization-bit` | *(none)* | Quantization bits (`4` or `8`) |
+| `--infer-flash-attn` | `auto` | Flash attention (`auto`, `fa2`, `disabled`) |
+| `-v` / `--verbose` | off | Enable debug logging |
+
+**Batch mode** reuses `scripts/prepare_data.py` from the training run to format the new CSV identically, then invokes `llamafactory-cli` with the saved adapter. Predictions are saved to `generated_predictions.jsonl` inside the inference output directory.
+
+**Single mode** prompts for each feature value interactively, builds an Alpaca-style prompt matching the training format, and generates a prediction directly (with optional XAI). The Inference tab in the Web UI exposes both modes without a terminal.
 
 ### Environment Configuration
 
@@ -159,7 +203,7 @@ CLI flags override `.env` values when both are specified.
 | `--output` | `output/<csv_stem>` | Output directory |
 | `--test-csv` | *(none)* | Optional separate test CSV (skips splitting) |
 | `--test-ratio` | `0.2` | Test split ratio (ignored when `--test-csv` is set) |
-| `--start-from` | *(none)* | Resume from step: `review_prep`, `split`, `cutoff`, or `config` |
+| `--start-from` | *(none)* | Resume from step: `review_prep`, `split`, or `config` |
 | `--agent-api-base` | env: `openAI_endpoint` | OpenAI-compatible API base URL |
 | `--agent-api-key` | env: `auth_key` | API key for the LLM endpoint |
 | `--agent-model` | env: `agent_LLM` | Model ID for reasoning/planning |
@@ -178,14 +222,14 @@ CLI flags override `.env` values when both are specified.
 | `--use-dora` | off | Enable DoRA adapter |
 | `--epochs` | `3.0` | Number of training epochs |
 | `--learning-rate` | `2.0e-5` | Learning rate |
-| `--batch-size` | `2` | Per-device train batch size |
-| `--grad-accumulation` | `8` | Gradient accumulation steps |
+| `--batch-size` | `1` | Per-device train batch size |
+| `--grad-accumulation` | `16` | Gradient accumulation steps |
 | `--logging-steps` | `10` | Logging interval in steps |
 | `--save-steps` | `500` | Checkpoint save interval |
 | `--quantization-bit` | *(none)* | Quantization bits (`4` or `8`) |
 | `--flash-attn` | `fa2` | Flash attention (`auto`, `fa2`, `disabled`) |
 | `--precision` | `bf16` | Training precision (`bf16` or `fp16`) |
-| `--xai` | off | Run attention-based XAI explanations after evaluation (requires `[train]` deps and GPU) |
+| `--xai` | off | Run XAI explanations after evaluation — SHAP, TransformerLens, and attention fallback (requires `[train]` deps and GPU) |
 
 ## Human-in-the-Loop Review
 
@@ -270,7 +314,9 @@ cutoff_len: 4096
 ## Robustness & Reliability
 
 - **Automated JSON Repair**: The pipeline includes a robust parsing layer that can automatically repair common LLM errors (e.g., unclosed brackets or trailing commas), significantly reducing pipeline crashes during planning and code generation.
-- **Retry Logic**: All code execution nodes (preparation, balancing) feature automated retries with error feedback loops, allowing the LLM to fix its own bugs.
+- **Retry Logic**: All code execution nodes (preparation, balancing) feature automated retries with error feedback loops. On retry, the LLM sees both the error message *and* the previous failed script, enabling more targeted self-correction.
+- **WANDB Disabled by Default**: `WANDB_DISABLED=true` is set automatically when invoking LlamaFactory, so no Weights & Biases API key is required.
+- **Cross-Platform Paths**: Checkpoint state is normalized on save/load so runs started on Windows can be resumed on Linux and vice versa.
 - **Human-in-the-Loop**: Checkpoints at every critical stage ensure you can override decisions before expensive GPU resources are consumed.
 
 ## Feature Selection
@@ -314,8 +360,8 @@ output/<csv_stem>/
 │   ├── evaluation/
 │   │   └── results.json         # Accuracy, F1, confusion matrix
 │   └── xai/                     # (only if --xai)
-│       ├── xai_report.json      # Per-sample token-level explanations
-│       └── attention_heatmap.png # Top-token attention visualization
+│       ├── xai_report.json      # Per-sample token-level explanations (all methods)
+│       └── xai_heatmap.png      # Top-token attribution visualization
 └── run_20250221_091200/         # Next run — past runs preserved
     └── ...
 ```
@@ -326,6 +372,7 @@ output/<csv_stem>/
 src/auto_llm_predictor/
 ├── main.py                     # CLI entry point with interrupt/resume loop
 ├── webui.py                    # Web UI server (FastAPI + SSE + threads)
+├── inference.py                # Standalone inference CLI (batch & single modes)
 ├── graph.py                    # LangGraph pipeline definition
 ├── state.py                    # PipelineState TypedDict schema
 ├── checkpoint.py               # Save/load state for --start-from

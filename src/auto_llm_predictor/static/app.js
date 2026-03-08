@@ -250,6 +250,11 @@
                 showReview(evt);
                 break;
 
+            case "eval_results":
+                appendLog("📊 Evaluation complete — results available", "complete");
+                showResults(evt);
+                break;
+
             case "complete":
                 appendLog("✅ " + evt.message, "complete");
                 // Mark all remaining steps as done
@@ -457,4 +462,318 @@
             // No active run or server unreachable — stay on config page
         }
     })();
+
+    // =========================================================
+    // INFERENCE TAB
+    // =========================================================
+
+    // ── Tab switching ─────────────────────────────────────────
+    const tabBar = document.getElementById("tab-bar");
+    if (tabBar) {
+        tabBar.addEventListener("click", function (e) {
+            const btn = e.target.closest(".tab");
+            if (!btn) return;
+            const tabName = btn.dataset.tab;
+
+            // Update tab buttons
+            tabBar.querySelectorAll(".tab").forEach(function (t) {
+                t.classList.remove("tab--active");
+            });
+            btn.classList.add("tab--active");
+
+            // Update tab content
+            document.querySelectorAll(".tab-content").forEach(function (tc) {
+                tc.classList.remove("tab-content--active");
+            });
+            const target = document.getElementById("tab-" + tabName);
+            if (target) target.classList.add("tab-content--active");
+        });
+    }
+
+    // ── Inference mode toggle (batch / single) ───────────────
+    const modeBatchBtn = document.getElementById("mode-batch-btn");
+    const modeSingleBtn = document.getElementById("mode-single-btn");
+    const inferBatchPanel = document.getElementById("infer-batch-panel");
+    const inferSinglePanel = document.getElementById("infer-single-panel");
+
+    function setInferMode(mode) {
+        if (mode === "batch") {
+            modeBatchBtn.classList.add("infer-mode-btn--active");
+            modeSingleBtn.classList.remove("infer-mode-btn--active");
+            inferBatchPanel.classList.remove("infer-panel--hidden");
+            inferSinglePanel.classList.add("infer-panel--hidden");
+        } else {
+            modeSingleBtn.classList.add("infer-mode-btn--active");
+            modeBatchBtn.classList.remove("infer-mode-btn--active");
+            inferSinglePanel.classList.remove("infer-panel--hidden");
+            inferBatchPanel.classList.add("infer-panel--hidden");
+        }
+    }
+
+    if (modeBatchBtn) modeBatchBtn.addEventListener("click", function () { setInferMode("batch"); });
+    if (modeSingleBtn) modeSingleBtn.addEventListener("click", function () { setInferMode("single"); });
+
+    // ── Inference file drop  ─────────────────────────────────
+    const inferFileDrop = document.getElementById("infer-file-drop");
+    const inferCsvFile = document.getElementById("infer-csv-file");
+    const inferFileName = document.getElementById("infer-file-name");
+
+    if (inferFileDrop && inferCsvFile) {
+        inferFileDrop.addEventListener("click", function () { inferCsvFile.click(); });
+        inferCsvFile.addEventListener("change", function () {
+            if (inferCsvFile.files.length) {
+                inferFileName.textContent = inferCsvFile.files[0].name;
+                inferFileDrop.classList.add("file-drop--has-file");
+            }
+        });
+        inferFileDrop.addEventListener("dragover", function (e) { e.preventDefault(); inferFileDrop.classList.add("file-drop--drag"); });
+        inferFileDrop.addEventListener("dragleave", function () { inferFileDrop.classList.remove("file-drop--drag"); });
+        inferFileDrop.addEventListener("drop", function (e) {
+            e.preventDefault();
+            inferFileDrop.classList.remove("file-drop--drag");
+            if (e.dataTransfer.files.length) {
+                inferCsvFile.files = e.dataTransfer.files;
+                inferFileName.textContent = e.dataTransfer.files[0].name;
+                inferFileDrop.classList.add("file-drop--has-file");
+            }
+        });
+    }
+
+    // ── Inference log helper ─────────────────────────────────
+    const inferLog = document.getElementById("infer-log");
+
+    function appendInferLog(msg, cls) {
+        if (!inferLog) return;
+        const line = document.createElement("div");
+        line.className = "log__line" + (cls ? " log__line--" + cls : "");
+        line.textContent = msg;
+        inferLog.appendChild(line);
+        inferLog.scrollTop = inferLog.scrollHeight;
+    }
+
+    // ── Batch inference ──────────────────────────────────────
+    const inferBatchForm = document.getElementById("infer-batch-form");
+    const inferBatchBtn = document.getElementById("infer-batch-btn");
+    const inferResultsPanel = document.getElementById("infer-results-panel");
+    const inferResultsContent = document.getElementById("infer-results-content");
+
+    if (inferBatchForm) {
+        inferBatchForm.addEventListener("submit", async function (e) {
+            e.preventDefault();
+
+            const outputDir = document.getElementById("infer-output-dir").value.trim();
+            const runDir = document.getElementById("infer-run-dir").value.trim();
+
+            if (!outputDir || !runDir) {
+                alert("Please fill in both Training Output Directory and Run Directory.");
+                return;
+            }
+
+            if (!inferCsvFile.files.length) {
+                alert("Please select a CSV file for inference.");
+                return;
+            }
+
+            // Clear previous
+            inferLog.innerHTML = "";
+            inferResultsPanel.classList.add("results-panel--hidden");
+            inferBatchBtn.disabled = true;
+            inferBatchBtn.innerHTML = '<span class="spinner"></span> Running…';
+
+            const fd = new FormData();
+            fd.append("csv_file", inferCsvFile.files[0]);
+            fd.append("output_dir", outputDir);
+            fd.append("run_dir", runDir);
+
+            try {
+                const res = await fetch("/api/infer/batch", { method: "POST", body: fd });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    appendInferLog("Error: " + (data.error || "Unknown error"), "error");
+                    inferBatchBtn.disabled = false;
+                    inferBatchBtn.textContent = "Run Batch Inference";
+                    return;
+                }
+
+                const runId = data.run_id;
+                appendInferLog("Batch inference started (run " + runId + ")", "status");
+
+                // Connect SSE for batch inference
+                const evtSource = new EventSource("/api/events/" + runId);
+                evtSource.onmessage = function (ev) {
+                    const evt = JSON.parse(ev.data);
+                    if (evt.event === "log") {
+                        appendInferLog(evt.data.message || "");
+                    } else if (evt.event === "status") {
+                        appendInferLog(evt.data.message || "", "status");
+                    } else if (evt.event === "complete") {
+                        appendInferLog("✓ " + (evt.data.message || "Complete!"), "status");
+                        inferResultsPanel.classList.remove("results-panel--hidden");
+                        inferResultsContent.innerHTML =
+                            '<p><strong>Samples:</strong> ' + (evt.data.num_samples || 0) + '</p>' +
+                            '<p><strong>Output:</strong> ' + (evt.data.infer_output || '') + '</p>' +
+                            '<a href="/api/infer/download/' + runId + '" class="btn btn--sm btn--secondary" download>⬇ Download Predictions</a>';
+                        inferBatchBtn.disabled = false;
+                        inferBatchBtn.textContent = "Run Batch Inference";
+                        evtSource.close();
+                    } else if (evt.event === "error") {
+                        appendInferLog("✗ Error: " + (evt.data.message || ""), "error");
+                        inferBatchBtn.disabled = false;
+                        inferBatchBtn.textContent = "Run Batch Inference";
+                        evtSource.close();
+                    }
+                };
+                evtSource.onerror = function () {
+                    appendInferLog("SSE connection lost", "error");
+                    inferBatchBtn.disabled = false;
+                    inferBatchBtn.textContent = "Run Batch Inference";
+                    evtSource.close();
+                };
+            } catch (err) {
+                appendInferLog("Network error: " + err.message, "error");
+                inferBatchBtn.disabled = false;
+                inferBatchBtn.textContent = "Run Batch Inference";
+            }
+        });
+    }
+
+    // ── Single inference — load features ─────────────────────
+    const loadFeaturesBtn = document.getElementById("load-features-btn");
+    const featureInputsDiv = document.getElementById("feature-inputs");
+    const inferSingleBtn = document.getElementById("infer-single-btn");
+    const singleResultPanel = document.getElementById("single-result-panel");
+    const singleResultContent = document.getElementById("single-result-content");
+
+    let loadedFeatures = [];
+
+    if (loadFeaturesBtn) {
+        loadFeaturesBtn.addEventListener("click", async function () {
+            const outputDir = document.getElementById("infer-output-dir").value.trim();
+            if (!outputDir) {
+                alert("Please enter the Training Output Directory first.");
+                return;
+            }
+
+            loadFeaturesBtn.disabled = true;
+            loadFeaturesBtn.textContent = "Loading…";
+
+            try {
+                const res = await fetch("/api/infer/features?output_dir=" + encodeURIComponent(outputDir));
+                const data = await res.json();
+
+                if (!res.ok) {
+                    alert("Error: " + (data.error || "Unknown"));
+                    return;
+                }
+
+                loadedFeatures = data.features || [];
+                if (!loadedFeatures.length) {
+                    featureInputsDiv.innerHTML = '<p class="form__hint">No features found in pipeline state.</p>';
+                    return;
+                }
+
+                // Build feature input fields
+                let html = "";
+                for (const feat of loadedFeatures) {
+                    html += '<div class="feature-input-row">';
+                    html += '<label class="form__label">' + feat + '</label>';
+                    html += '<input type="text" class="form__input feature-value" data-feature="' + feat + '" placeholder="Enter value">';
+                    html += '</div>';
+                }
+                featureInputsDiv.innerHTML = html;
+                inferSingleBtn.disabled = false;
+            } catch (err) {
+                alert("Network error: " + err.message);
+            } finally {
+                loadFeaturesBtn.disabled = false;
+                loadFeaturesBtn.textContent = "↻ Load Features";
+            }
+        });
+    }
+
+    // ── Single inference — predict ───────────────────────────
+    if (inferSingleBtn) {
+        inferSingleBtn.addEventListener("click", async function () {
+            const outputDir = document.getElementById("infer-output-dir").value.trim();
+            const runDir = document.getElementById("infer-run-dir").value.trim();
+
+            if (!outputDir || !runDir) {
+                alert("Please fill in both directories.");
+                return;
+            }
+
+            // Collect feature values
+            const features = {};
+            const inputs = featureInputsDiv.querySelectorAll(".feature-value");
+            for (const inp of inputs) {
+                features[inp.dataset.feature] = inp.value.trim();
+            }
+
+            const xaiEnabled = document.getElementById("infer-xai").checked;
+
+            inferSingleBtn.disabled = true;
+            inferSingleBtn.innerHTML = '<span class="spinner"></span> Predicting…';
+            singleResultPanel.classList.add("results-panel--hidden");
+            appendInferLog("Running single inference…", "status");
+
+            const fd = new FormData();
+            fd.append("output_dir", outputDir);
+            fd.append("run_dir", runDir);
+            fd.append("features_json", JSON.stringify(features));
+            fd.append("xai", xaiEnabled ? "true" : "false");
+
+            try {
+                const res = await fetch("/api/infer/single", { method: "POST", body: fd });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    appendInferLog("Error: " + (data.error || "Unknown"), "error");
+                    return;
+                }
+
+                appendInferLog("✓ Prediction: " + data.prediction, "status");
+
+                // Show result
+                let html = '<div class="single-prediction">';
+                html += '<p class="prediction-label">Prediction</p>';
+                html += '<p class="prediction-value">' + (data.prediction || "—") + '</p>';
+
+                if (data.target_mapping && Object.keys(data.target_mapping).length) {
+                    html += '<p class="prediction-mapping"><small>Target mapping: ' +
+                        JSON.stringify(data.target_mapping) + '</small></p>';
+                }
+
+                // XAI results
+                if (data.xai_results && data.xai_results.length) {
+                    for (const xr of data.xai_results) {
+                        const method = (xr.method || "unknown").toUpperCase();
+                        html += '<div class="xai-result">';
+                        html += '<h4 class="xai-method">XAI — ' + method + '</h4>';
+                        const explanations = xr.sample_explanations || [];
+                        if (explanations.length && explanations[0].token_scores) {
+                            html += '<table class="xai-tokens"><thead><tr><th>Token</th><th>Score</th></tr></thead><tbody>';
+                            for (const ts of explanations[0].token_scores.slice(0, 15)) {
+                                const barWidth = Math.min(100, Math.round(ts.score * 1000));
+                                html += '<tr><td class="xai-token">' + ts.token + '</td>';
+                                html += '<td class="xai-score"><div class="xai-bar" style="width:' + barWidth + '%"></div>';
+                                html += '<span>' + ts.score.toFixed(6) + '</span></td></tr>';
+                            }
+                            html += '</tbody></table>';
+                        }
+                        html += '</div>';
+                    }
+                }
+
+                html += '</div>';
+                singleResultContent.innerHTML = html;
+                singleResultPanel.classList.remove("results-panel--hidden");
+            } catch (err) {
+                appendInferLog("Network error: " + err.message, "error");
+            } finally {
+                inferSingleBtn.disabled = false;
+                inferSingleBtn.innerHTML = '🔍 Predict';
+            }
+        });
+    }
 })();

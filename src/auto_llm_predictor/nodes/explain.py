@@ -24,6 +24,7 @@ import logging
 from pathlib import Path
 
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 
 from auto_llm_predictor.state import PipelineState
 
@@ -102,9 +103,18 @@ def _build_prompt(entry: dict) -> str:
     return instruction
 
 
+# ── Log helper ─────────────────────────────────────────────────────
+
+def _log(msg: str, callback=None) -> None:
+    """Print to stdout and, if available, send to the web UI via callback."""
+    print(msg, flush=True)
+    if callback:
+        callback(msg)
+
+
 # ── Method 1: SHAP ─────────────────────────────────────────────────
 
-def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path) -> dict | None:
+def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path, log_callback=None) -> dict | None:
     """Run SHAP text explainer on the fine-tuned model.
 
     Uses ``shap.Explainer`` with a HuggingFace text-generation pipeline.
@@ -138,7 +148,7 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path) -> dict | No
         prompts = [_build_prompt(s) for s in samples]
         true_labels = [s.get("output", "") for s in samples]
 
-        print("  Running SHAP explanations...", flush=True)
+        _log("  Running SHAP explanations...", log_callback)
         shap_values = explainer(prompts)
 
         # Extract per-sample token-level SHAP values
@@ -179,7 +189,7 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path) -> dict | No
             })
 
             if (i + 1) % 10 == 0 or i == len(prompts) - 1:
-                print(f"    SHAP: {i + 1}/{len(prompts)} samples", flush=True)
+                _log(f"    SHAP: {i + 1}/{len(prompts)} samples", log_callback)
 
         # Save SHAP HTML visualisation if possible
         try:
@@ -192,7 +202,7 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path) -> dict | No
             logger.debug("Could not save SHAP HTML plot: %s", exc)
 
         explained = sum(1 for s in sample_explanations if s["token_scores"])
-        print(f"  ✓ SHAP complete: {explained}/{len(sample_explanations)} samples\n", flush=True)
+        _log(f"  ✓ SHAP complete: {explained}/{len(sample_explanations)} samples\n", log_callback)
 
         return {
             "method": "shap",
@@ -202,7 +212,7 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path) -> dict | No
 
     except Exception as exc:
         logger.warning("SHAP method failed: %s", exc, exc_info=True)
-        print(f"  ✗ SHAP failed: {exc}\n", flush=True)
+        _log(f"  ✗ SHAP failed: {exc}\n", log_callback)
         return None
 
 
@@ -210,6 +220,7 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path) -> dict | No
 
 def _run_transformer_lens(
     model, tokenizer, base_model: str, samples: list[dict], xai_dir: Path,
+    log_callback=None,
 ) -> dict | None:
     """Run TransformerLens logit attribution on the merged model.
 
@@ -225,7 +236,7 @@ def _run_transformer_lens(
     try:
         import torch
 
-        print("  Loading HookedTransformer...", flush=True)
+        _log("  Loading HookedTransformer...", log_callback)
         hooked = HookedTransformer.from_pretrained(
             base_model,
             hf_model=model,
@@ -289,13 +300,13 @@ def _run_transformer_lens(
                 })
 
             if (i + 1) % 10 == 0 or i == len(samples) - 1:
-                print(f"    TransformerLens: {i + 1}/{len(samples)} samples", flush=True)
+                _log(f"    TransformerLens: {i + 1}/{len(samples)} samples", log_callback)
 
         del hooked
         _cleanup_gpu()
 
         explained = sum(1 for s in sample_explanations if s["token_scores"])
-        print(f"  ✓ TransformerLens complete: {explained}/{len(sample_explanations)} samples\n", flush=True)
+        _log(f"  ✓ TransformerLens complete: {explained}/{len(sample_explanations)} samples\n", log_callback)
 
         return {
             "method": "transformer_lens",
@@ -305,13 +316,13 @@ def _run_transformer_lens(
 
     except Exception as exc:
         logger.warning("TransformerLens method failed: %s", exc, exc_info=True)
-        print(f"  ✗ TransformerLens failed: {exc}\n", flush=True)
+        _log(f"  ✗ TransformerLens failed: {exc}\n", log_callback)
         return None
 
 
 # ── Method 3: Attention fallback ───────────────────────────────────
 
-def _run_attention(model, tokenizer, samples: list[dict]) -> dict | None:
+def _run_attention(model, tokenizer, samples: list[dict], log_callback=None) -> dict | None:
     """Fallback: extract last-layer attention weights.
 
     Reloading with ``attn_implementation='eager'`` is NOT needed here
@@ -379,10 +390,10 @@ def _run_attention(model, tokenizer, samples: list[dict]) -> dict | None:
                 })
 
             if (i + 1) % 10 == 0 or i == len(samples) - 1:
-                print(f"    Attention: {i + 1}/{len(samples)} samples", flush=True)
+                _log(f"    Attention: {i + 1}/{len(samples)} samples", log_callback)
 
         explained = sum(1 for s in sample_explanations if s["token_scores"])
-        print(f"  ✓ Attention complete: {explained}/{len(sample_explanations)} samples\n", flush=True)
+        _log(f"  ✓ Attention complete: {explained}/{len(sample_explanations)} samples\n", log_callback)
 
         return {
             "method": "attention",
@@ -392,7 +403,7 @@ def _run_attention(model, tokenizer, samples: list[dict]) -> dict | None:
 
     except Exception as exc:
         logger.warning("Attention fallback failed: %s", exc, exc_info=True)
-        print(f"  ✗ Attention fallback failed: {exc}\n", flush=True)
+        _log(f"  ✗ Attention fallback failed: {exc}\n", log_callback)
         return None
 
 
@@ -464,7 +475,7 @@ def _skip_result(reason: str) -> dict:
 
 # ── Main node ──────────────────────────────────────────────────────
 
-def run_xai(state: PipelineState) -> dict:
+def run_xai(state: PipelineState, config: RunnableConfig) -> dict:
     """Generate token-level explanations using SHAP, TransformerLens, and attention.
 
     Priority: SHAP → TransformerLens → Attention (fallback).
@@ -472,6 +483,8 @@ def run_xai(state: PipelineState) -> dict:
 
     Writes: xai_report_path, messages
     """
+    log_callback = config.get("configurable", {}).get("log_callback")
+
     # ── Skip guards ────────────────────────────────────────────
     if not state.get("xai_enabled", False):
         logger.info("XAI not enabled — skipping.")
@@ -504,13 +517,16 @@ def run_xai(state: PipelineState) -> dict:
     training_config = state.get("training_config", {})
 
     # ── Load and merge model ───────────────────────────────────
-    print("\n" + "=" * 60)
-    print("EXPLAINABILITY (XAI)")
-    print(f"Model: {base_model}")
-    print(f"Adapter: {adapter_path}")
-    print(f"Samples: {len(samples)}")
-    print(f"Methods: SHAP → TransformerLens → Attention (fallback)")
-    print("=" * 60 + "\n", flush=True)
+    header = (
+        "\n" + "=" * 60 + "\n"
+        "EXPLAINABILITY (XAI)\n"
+        f"Model: {base_model}\n"
+        f"Adapter: {adapter_path}\n"
+        f"Samples: {len(samples)}\n"
+        "Methods: SHAP → TransformerLens → Attention (fallback)\n"
+        + "=" * 60 + "\n"
+    )
+    _log(header, log_callback)
 
     try:
         model, tokenizer = _merge_and_load(base_model, adapter_path, training_config)
@@ -526,26 +542,26 @@ def run_xai(state: PipelineState) -> dict:
     method_results = []
 
     # 1. SHAP
-    shap_result = _run_shap(model, tokenizer, samples, xai_dir)
+    shap_result = _run_shap(model, tokenizer, samples, xai_dir, log_callback)
     if shap_result:
         method_results.append(shap_result)
 
     # 2. TransformerLens
-    tl_result = _run_transformer_lens(model, tokenizer, base_model, samples, xai_dir)
+    tl_result = _run_transformer_lens(model, tokenizer, base_model, samples, xai_dir, log_callback)
     if tl_result:
         method_results.append(tl_result)
 
     # 3. Attention fallback — only if both SHAP and TransformerLens failed
     if not method_results:
-        print("  Both SHAP and TransformerLens unavailable — trying attention fallback...", flush=True)
-        attn_result = _run_attention(model, tokenizer, samples)
+        _log("  Both SHAP and TransformerLens unavailable — trying attention fallback...", log_callback)
+        attn_result = _run_attention(model, tokenizer, samples, log_callback)
         if attn_result:
             method_results.append(attn_result)
 
     # ── Unload model ───────────────────────────────────────────
     del model, tokenizer
     _cleanup_gpu()
-    print("✓ Model unloaded, GPU memory freed\n", flush=True)
+    _log("✓ Model unloaded, GPU memory freed\n", log_callback)
 
     if not method_results:
         return _skip_result("FAILED — all XAI methods failed.")
@@ -573,7 +589,7 @@ def run_xai(state: PipelineState) -> dict:
     methods = ", ".join(r["method"] for r in method_results)
     summary = f"XAI complete ({methods}). Report at {report_path}"
 
-    print(f"\n✓ {summary}\n", flush=True)
+    _log(f"\n✓ {summary}\n", log_callback)
 
     return {
         "xai_report_path": str(report_path),

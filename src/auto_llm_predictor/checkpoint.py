@@ -7,12 +7,23 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from auto_llm_predictor.utils import normalize_path
+
 logger = logging.getLogger(__name__)
 
 _STATE_FILE = ".pipeline_state.json"
 
 # Fields to exclude from serialization (non-JSON-serializable or transient)
 _SKIP_FIELDS = {"messages"}
+
+# State fields that contain filesystem paths and should be normalized
+_PATH_FIELDS = {
+    "csv_path", "test_csv_path", "output_dir", "run_dir",
+    "adapter_path", "prep_code_path", "all_data_path",
+    "train_data_path", "test_data_path", "dataset_info_path",
+    "lmf_train_yaml", "lmf_predict_train_yaml", "lmf_predict_test_yaml",
+    "train_predictions_path", "test_predictions_path",
+}
 
 
 def save_state(state: dict[str, Any], output_dir: str) -> str:
@@ -22,13 +33,15 @@ def save_state(state: dict[str, Any], output_dir: str) -> str:
     """
     state_path = Path(output_dir) / _STATE_FILE
 
-    # Filter out non-serializable fields
+    # Filter out non-serializable fields and normalize path values
     serializable = {}
     for key, value in state.items():
         if key in _SKIP_FIELDS:
             continue
         try:
             json.dumps(value)  # test serializability
+            if key in _PATH_FIELDS and isinstance(value, str) and value:
+                value = normalize_path(value)
             serializable[key] = value
         except (TypeError, ValueError):
             logger.debug("Skipping non-serializable field: %s", key)
@@ -64,6 +77,12 @@ def load_state(output_dir: str) -> dict[str, Any]:
             f"Delete the file and re-run the pipeline from scratch, "
             f"or fix the JSON manually."
         ) from e
+
+    # Normalize any path fields that may contain mixed separators
+    for key in _PATH_FIELDS:
+        val = state.get(key)
+        if isinstance(val, str) and val:
+            state[key] = normalize_path(val)
 
     state["messages"] = []  # fresh message list for the new session
     logger.info("Loaded pipeline state from %s (%d fields)", state_path, len(state))

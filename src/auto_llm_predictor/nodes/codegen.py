@@ -27,8 +27,10 @@ def write_prep_code(state: PipelineState, *, llm) -> dict:
 
     # Build the error context from the previous attempt if any
     previous_error = ""
+    previous_code = ""
     if state.get("prep_result") and not state.get("prep_succeeded", True):
         previous_error = state["prep_result"]
+        previous_code = state.get("prep_code", "")
 
     user_prompt = format_codegen_prompt(
         csv_path=state["csv_path"],
@@ -44,6 +46,7 @@ def write_prep_code(state: PipelineState, *, llm) -> dict:
         output_data_dir=output_data_dir,
         test_csv_path=state.get("test_csv_path", ""),
         previous_error=previous_error,
+        previous_code=previous_code,
         user_feedback=state.get("user_feedback", ""),
     )
 

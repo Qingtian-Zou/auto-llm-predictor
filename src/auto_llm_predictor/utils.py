@@ -25,6 +25,16 @@ from pathlib import Path
 import pandas as pd
 
 
+def normalize_path(p: str) -> str:
+    """Normalize a path string to use OS-native separators.
+
+    Replaces backslashes with forward slashes so that paths originating
+    from Windows-style input work correctly on POSIX systems (where ``\\``
+    is a legal filename character rather than a separator).
+    """
+    return str(Path(p.replace("\\", "/")))
+
+
 def profile_csv(csv_path: str, max_rows: int = 5, max_cols: int = 60) -> str:
     """Build an LLM-readable text summary of a CSV file.
 

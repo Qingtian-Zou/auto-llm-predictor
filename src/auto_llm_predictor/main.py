@@ -28,6 +28,7 @@ from langgraph.types import Command
 
 from auto_llm_predictor.checkpoint import load_state
 from auto_llm_predictor.graph import build_graph
+from auto_llm_predictor.utils import normalize_path
 
 
 def _build_training_config(args) -> dict:
@@ -139,14 +140,14 @@ Examples:
     )
 
     # ── Validate inputs ────────────────────────────────────────
-    csv_path = Path(args.csv).resolve()
+    csv_path = Path(normalize_path(args.csv)).resolve()
     if not csv_path.exists():
         print(f"Error: CSV file not found: {csv_path}", file=sys.stderr)
         sys.exit(1)
 
     test_csv_path = ""
     if args.test_csv:
-        test_csv_path = str(Path(args.test_csv).resolve())
+        test_csv_path = normalize_path(str(Path(args.test_csv).resolve()))
         if not Path(test_csv_path).exists():
             print(f"Error: Test CSV file not found: {test_csv_path}", file=sys.stderr)
             sys.exit(1)
@@ -171,8 +172,8 @@ Examples:
               file=sys.stderr)
         sys.exit(1)
 
-    output_dir = args.output if args.output else f"output/{csv_path.stem}"
-    output_dir = str(Path(output_dir).resolve())
+    output_dir = args.output if args.output else str(Path("output") / csv_path.stem)
+    output_dir = normalize_path(str(Path(output_dir).resolve()))
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # ── Build and run the graph ────────────────────────────────
@@ -308,26 +309,14 @@ def _run_with_review_loop(app, initial_state: dict, config: dict) -> dict:
 
 
 def _print_results(final_state: dict, output_dir: str):
-    """Print evaluation results summary."""
+    """Print pipeline completion summary (eval metrics already shown by node)."""
     print("\n" + "=" * 60)
     print("Pipeline Complete!")
     print("=" * 60)
 
-    eval_results = final_state.get("eval_results", {})
-    for split, metrics in eval_results.items():
-        if isinstance(metrics, dict) and "accuracy" in metrics:
-            print(f"\n{split.upper()} Results:")
-            print(f"  Accuracy:           {metrics['accuracy']:.4f}")
-            print(f"  Valid predictions:   {metrics['valid_predictions']}/{metrics['total_samples']}")
-            if "f1" in metrics:
-                print(f"  F1 Score:           {metrics['f1']:.4f}")
-            if "macro_f1" in metrics:
-                print(f"  Macro F1:           {metrics['macro_f1']:.4f}")
-                print(f"  Weighted F1:        {metrics['weighted_f1']:.4f}")
-
     run_dir = final_state.get("run_dir", output_dir)
     print(f"\nRun artefacts:    {run_dir}")
-    print(f"Data directory:   {output_dir}/data")
+    print(f"Data directory:   {Path(output_dir) / 'data'}")
     print("=" * 60)
 
 

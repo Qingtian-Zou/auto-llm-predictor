@@ -44,6 +44,8 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import StreamingResponse
 
+from auto_llm_predictor.utils import normalize_path
+
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
@@ -129,8 +131,16 @@ def _stream_graph(run: RunState, input_data: dict | Any) -> None:
                 # Node just finished
                 _emit(run, "node_complete", {"node": node_name, "message": f"Completed: {node_name}"})
 
-        # "updates" mode chunks (node_name -> output dict) are intentionally
-        # ignored here — we rely entirely on the debug events for timing.
+        # Intercept evaluation results from updates so we can surface them
+        # immediately, before the optional XAI node runs.
+        if mode == "updates" and isinstance(chunk, dict) and "run_evaluation" in chunk:
+            eval_output = chunk["run_evaluation"]
+            if "eval_results" in eval_output:
+                run_dir = run.app.get_state(run.thread_config).values.get("run_dir", "")
+                _emit(run, "eval_results", _format_results({
+                    "eval_results": eval_output["eval_results"],
+                    "run_dir": run_dir,
+                }))
 
 
 def _run_pipeline(run: RunState, initial_state: dict) -> None:
@@ -243,6 +253,51 @@ def _format_results(final_state: dict) -> dict:
 # FastAPI application
 # ---------------------------------------------------------------------------
 
+    return app
+
+
+# ---------------------------------------------------------------------------
+# Inference runner (runs in a background thread)
+# ---------------------------------------------------------------------------
+
+def _run_batch_inference(run: RunState, output_dir: str, run_dir: str,
+                         csv_path: str, infer_output: str,
+                         precision: str, flash_attn: str,
+                         quantization_bit: int | None) -> None:
+    """Execute batch inference, emitting SSE events."""
+    from auto_llm_predictor.inference import run_batch_inference
+
+    try:
+        run.status = "running"
+        _emit(run, "status", {"status": "running", "message": "Batch inference started"})
+
+        result = run_batch_inference(
+            output_dir=output_dir,
+            run_dir=run_dir,
+            csv_path=csv_path,
+            infer_output=infer_output,
+            precision=precision,
+            flash_attn=flash_attn,
+            quantization_bit=quantization_bit,
+            log_callback=lambda msg: _emit(run, "log", {"message": msg}),
+        )
+
+        run.status = "completed"
+        run.final_state = result
+        _emit(run, "complete", {
+            "message": "Batch inference complete!",
+            "predictions_path": result.get("predictions_path", ""),
+            "num_samples": result.get("num_samples", 0),
+            "infer_output": result.get("infer_output", ""),
+        })
+
+    except Exception as exc:
+        logger.exception("Batch inference error for run %s", run.run_id)
+        run.status = "error"
+        run.error = str(exc)
+        _emit(run, "error", {"message": str(exc)})
+
+
 def create_app() -> FastAPI:
     """Build the FastAPI application."""
     app = FastAPI(title="Auto LLM Predictor — Web UI")
@@ -312,8 +367,8 @@ def create_app() -> FastAPI:
         # Save uploaded CSV
         run_id = uuid.uuid4().hex[:12]
         csv_stem = Path(csv_file.filename or "dataset").stem
-        output_dir = output if output else f"output/{csv_stem}"
-        output_dir = str(Path(output_dir).resolve())
+        output_dir = output if output else str(Path("output") / csv_stem)
+        output_dir = normalize_path(str(Path(output_dir).resolve()))
         Path(output_dir).mkdir(parents=True, exist_ok=True)
 
         csv_path = Path(output_dir) / (csv_file.filename or "upload.csv")
@@ -326,7 +381,7 @@ def create_app() -> FastAPI:
             test_csv_dest = Path(output_dir) / test_csv_file.filename
             with open(test_csv_dest, "wb") as f:
                 shutil.copyfileobj(test_csv_file.file, f)
-            test_csv_path = str(test_csv_dest)
+            test_csv_path = normalize_path(str(test_csv_dest))
 
         # Build graph
         graph_app = build_graph(
@@ -548,6 +603,124 @@ def create_app() -> FastAPI:
                     "current_node": run.current_node,
                 }
         return {"run_id": None}
+
+    # ── Inference: batch ──────────────────────────────────────
+    @app.post("/api/infer/batch")
+    async def start_batch_inference(
+        csv_file: UploadFile = File(...),
+        output_dir: str = Form(...),
+        run_dir: str = Form(...),
+        infer_output: str = Form(""),
+        precision: str = Form("bf16"),
+        flash_attn: str = Form("auto"),
+        quantization_bit: int | None = Form(None),
+    ):
+        output_dir = normalize_path(str(Path(output_dir).resolve()))
+        run_dir = normalize_path(str(Path(run_dir).resolve()))
+
+        if not Path(output_dir).exists():
+            return JSONResponse(status_code=400, content={"error": f"Output directory not found: {output_dir}"})
+        if not Path(run_dir).exists():
+            return JSONResponse(status_code=400, content={"error": f"Run directory not found: {run_dir}"})
+
+        run_id = uuid.uuid4().hex[:12]
+
+        # Save uploaded CSV to a temp location
+        tmp_dir = Path(normalize_path(infer_output)) if infer_output else Path(run_dir) / "inference_tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        csv_path = tmp_dir / (csv_file.filename or "infer_upload.csv")
+        with open(csv_path, "wb") as f:
+            shutil.copyfileobj(csv_file.file, f)
+
+        loop = asyncio.get_event_loop()
+        run = RunState(
+            run_id=run_id,
+            queue=asyncio.Queue(),
+            loop=loop,
+        )
+        _runs[run_id] = run
+
+        t = threading.Thread(
+            target=_run_batch_inference,
+            args=(run, output_dir, run_dir, str(csv_path), infer_output,
+                  precision, flash_attn, quantization_bit),
+            daemon=True,
+        )
+        run.thread = t
+        t.start()
+
+        return {"run_id": run_id}
+
+    # ── Inference: single ─────────────────────────────────────
+    @app.post("/api/infer/single")
+    async def single_inference(
+        output_dir: str = Form(...),
+        run_dir: str = Form(...),
+        features_json: str = Form(...),
+        xai: bool = Form(False),
+        precision: str = Form("bf16"),
+        quantization_bit: int | None = Form(None),
+    ):
+        from auto_llm_predictor.inference import run_single_inference
+
+        output_dir = normalize_path(str(Path(output_dir).resolve()))
+        run_dir = normalize_path(str(Path(run_dir).resolve()))
+
+        if not Path(output_dir).exists():
+            return JSONResponse(status_code=400, content={"error": f"Output directory not found: {output_dir}"})
+        if not Path(run_dir).exists():
+            return JSONResponse(status_code=400, content={"error": f"Run directory not found: {run_dir}"})
+
+        try:
+            sample_features = json.loads(features_json)
+        except json.JSONDecodeError as e:
+            return JSONResponse(status_code=400, content={"error": f"Invalid features JSON: {e}"})
+
+        try:
+            result = run_single_inference(
+                output_dir=output_dir,
+                run_dir=run_dir,
+                sample_features=sample_features,
+                xai=xai,
+                precision=precision,
+                quantization_bit=quantization_bit,
+            )
+            return result
+        except Exception as e:
+            logger.exception("Single inference failed")
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    # ── Inference: get feature names ──────────────────────────
+    @app.get("/api/infer/features")
+    async def get_features(output_dir: str):
+        from auto_llm_predictor.inference import get_feature_names
+
+        output_dir = normalize_path(str(Path(output_dir).resolve()))
+        if not Path(output_dir).exists():
+            return JSONResponse(status_code=400, content={"error": f"Output directory not found: {output_dir}"})
+
+        try:
+            features = get_feature_names(output_dir)
+            return {"features": features}
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": str(e)})
+
+    # ── Inference: download predictions ───────────────────────
+    @app.get("/api/infer/download/{run_id}")
+    async def download_predictions(run_id: str):
+        run = _runs.get(run_id)
+        if not run:
+            return JSONResponse(status_code=404, content={"error": "Run not found"})
+
+        pred_path = run.final_state.get("predictions_path", "")
+        if not pred_path or not Path(pred_path).is_file():
+            return JSONResponse(status_code=404, content={"error": "Predictions not available yet."})
+
+        return FileResponse(
+            path=pred_path,
+            filename="predictions.jsonl",
+            media_type="application/octet-stream",
+        )
 
     return app
 

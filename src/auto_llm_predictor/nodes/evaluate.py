@@ -157,6 +157,22 @@ def run_evaluation(state: PipelineState) -> dict:
         json.dump(results, f, indent=2, default=str)
     logger.info("Saved evaluation results to %s", eval_path)
 
+    # Print results immediately so they're visible before optional XAI
+    print("\n" + "=" * 60)
+    print("Evaluation Results")
+    print("=" * 60)
+    for split, metrics in results.items():
+        if isinstance(metrics, dict) and "accuracy" in metrics:
+            print(f"\n{split.upper()} Results:")
+            print(f"  Accuracy:           {metrics['accuracy']:.4f}")
+            print(f"  Valid predictions:   {metrics['valid_predictions']}/{metrics['total_samples']}")
+            if "f1" in metrics:
+                print(f"  F1 Score:           {metrics['f1']:.4f}")
+            if "macro_f1" in metrics:
+                print(f"  Macro F1:           {metrics['macro_f1']:.4f}")
+                print(f"  Weighted F1:        {metrics['weighted_f1']:.4f}")
+    print("=" * 60)
+
     # Build summary message
     summary_parts = []
     for split, metrics in results.items():
