@@ -131,7 +131,7 @@ def select_features(state: PipelineState) -> dict:
     """
     csv_path = state["csv_path"]
     target_column = state["target_column"]
-    task_type = state.get("task_type", "binary")
+    task_type = state.get("task_type", "multiclass")
     output_dir = Path(state["output_dir"])
 
     df = pd.read_csv(csv_path, low_memory=False)

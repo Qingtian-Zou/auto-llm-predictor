@@ -65,7 +65,7 @@ def write_balance_code(state: PipelineState, *, llm) -> dict:
     user_prompt = format_balance_prompt(
         data_json_path=data_json_path,
         output_json_path=output_json_path,
-        task_type=state.get("task_type", "binary"),
+        task_type=state.get("task_type", "multiclass"),
         balance_strategy=balance_strategy,
         previous_error=previous_error,
         user_feedback=balance_feedback,

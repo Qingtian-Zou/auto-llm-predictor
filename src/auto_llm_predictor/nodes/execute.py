@@ -121,17 +121,26 @@ def execute_prep_code(state: PipelineState) -> dict:
         ],
     }
 
-    # Extract target_mapping from generated script if it succeeds
-    # This ensures any overrides from the review stage are persisted back to state
+    # Extract target_mapping from generated script if it succeeds.
+    # Only accept it if it does not reduce the number of classes.
     if files_exist:
         prep_code = state.get("prep_code", "")
         if prep_code:
             updated_mapping = _extract_target_mapping_from_code(prep_code)
             if updated_mapping is not None:
-                # Convert keys to strings so json serialization doesn't choke later
                 str_mapping = {str(k): v for k, v in updated_mapping.items()}
-                if str_mapping != state.get("target_mapping", {}):
-                    logger.info("Extracted updated target_mapping from generated script: %s", str_mapping)
+                original_mapping = state.get("target_mapping", {})
+                if len(str_mapping) < len(original_mapping):
+                    logger.warning(
+                        "Generated code has %d classes in target_mapping "
+                        "(state has %d). Ignoring code mapping to prevent class loss.",
+                        len(str_mapping), len(original_mapping),
+                    )
+                elif str_mapping != original_mapping:
+                    logger.info(
+                        "Extracted updated target_mapping from generated script: %s",
+                        str_mapping,
+                    )
                     ret["target_mapping"] = str_mapping
 
     return ret

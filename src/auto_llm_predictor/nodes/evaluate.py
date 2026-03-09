@@ -47,7 +47,7 @@ def _extract_label(text: str, target_mapping: dict[str, str]) -> str | None:
     return None
 
 
-def _compute_metrics(y_true: list[str], y_pred: list[str], labels: list[str]) -> dict:
+def _compute_metrics(y_true: list[str], y_pred: list[str], labels: list[str], task_type: str = "") -> dict:
     """Compute classification metrics."""
     from sklearn.metrics import (
         accuracy_score,
@@ -75,7 +75,9 @@ def _compute_metrics(y_true: list[str], y_pred: list[str], labels: list[str]) ->
         "accuracy": accuracy_score(yt, yp),
     }
 
-    if len(labels) == 2:
+    # Use explicit task_type when available; fall back to label count
+    is_binary = task_type == "binary" if task_type else len(labels) == 2
+    if is_binary:
         results["f1"] = f1_score(yt, yp, average="binary", pos_label=label_to_idx[labels[0]])
     else:
         results["macro_f1"] = f1_score(yt, yp, average="macro")
@@ -102,6 +104,7 @@ def run_evaluation(state: PipelineState) -> dict:
     """
     test_pred_path = state.get("test_predictions_path", "")
     target_mapping = state.get("target_mapping", {})
+    task_type = state.get("task_type", "")
     labels = list(target_mapping.values())
 
     results = {}
@@ -142,7 +145,7 @@ def run_evaluation(state: PipelineState) -> dict:
             else:
                 all_labels_with_unparsed = all_labels
 
-            metrics = _compute_metrics(y_true, y_pred, all_labels_with_unparsed)
+            metrics = _compute_metrics(y_true, y_pred, all_labels_with_unparsed, task_type=task_type)
             results[split] = metrics
             logger.info("%s evaluation: accuracy=%.4f", split, metrics.get("accuracy", 0))
         else:

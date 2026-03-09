@@ -9,6 +9,7 @@ data preparation scripts. Your scripts MUST:
 3. Read the CSV, apply the preparation plan, and produce output files
 4. Handle edge cases (missing values, unexpected types) gracefully
 5. Print progress messages to stdout
+6. Preserve ALL target classes exactly as specified in the target_mapping — never merge, drop, or simplify classes unless specifically instructed otherwise
 
 Output ONLY the complete Python script with no markdown fences, no explanation. \
 Just the raw Python code.
@@ -46,7 +47,7 @@ The script should:
 - For each row, create an example dict:
   * "instruction": the instruction template (same for every row)
   * "input": selected features formatted as readable text
-  * "output": the target label (mapped using target_mapping)
+  * "output": the target label (mapped using target_mapping — MUST preserve ALL classes)
 - DO NOT split data — splitting is handled by a separate step
 - Save the JSON files
 - Print summary statistics (total samples, class distribution)

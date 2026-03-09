@@ -782,3 +782,77 @@ class TestGetFeatureNames:
         features = get_feature_names(str(tmp_path))
         assert features == []
 
+
+# ---------------------------------------------------------------------------
+# Multiclass preservation
+# ---------------------------------------------------------------------------
+
+class TestMulticlassPreservation:
+    """Tests for the multiclass-to-binary conversion bug fix."""
+
+    def test_plan_target_mapping_cannot_reduce_classes(self):
+        """_validated_target_mapping rejects class reductions."""
+        from auto_llm_predictor.nodes.plan import _validated_target_mapping
+
+        original = {"0": "A", "1": "B", "2": "C"}
+        reduced = {"0": "A", "1": "B"}
+        assert _validated_target_mapping(reduced, original) == original
+
+    def test_plan_target_mapping_accepts_same_or_more(self):
+        from auto_llm_predictor.nodes.plan import _validated_target_mapping
+
+        original = {"0": "A", "1": "B"}
+        refined = {"0": "ClassA", "1": "ClassB"}
+        assert _validated_target_mapping(refined, original) == refined
+
+    def test_plan_target_mapping_accepts_more_classes(self):
+        from auto_llm_predictor.nodes.plan import _validated_target_mapping
+
+        original = {"0": "A", "1": "B"}
+        expanded = {"0": "A", "1": "B", "2": "C"}
+        assert _validated_target_mapping(expanded, original) == expanded
+
+    def test_plan_target_mapping_none_falls_back(self):
+        from auto_llm_predictor.nodes.plan import _validated_target_mapping
+
+        original = {"0": "A", "1": "B"}
+        assert _validated_target_mapping(None, original) == original
+
+    def test_plan_target_mapping_empty_falls_back(self):
+        from auto_llm_predictor.nodes.plan import _validated_target_mapping
+
+        original = {"0": "A", "1": "B"}
+        assert _validated_target_mapping({}, original) == original
+
+    def test_evaluate_uses_task_type_for_multiclass(self):
+        """_compute_metrics uses macro_f1 when task_type='multiclass' even with 2 labels."""
+        from auto_llm_predictor.nodes.evaluate import _compute_metrics
+
+        y_true = ["A", "B", "A", "B"]
+        y_pred = ["A", "B", "B", "A"]
+        labels = ["A", "B"]
+        result = _compute_metrics(y_true, y_pred, labels, task_type="multiclass")
+        assert "macro_f1" in result
+        assert "f1" not in result
+
+    def test_evaluate_binary_task_type(self):
+        from auto_llm_predictor.nodes.evaluate import _compute_metrics
+
+        y_true = ["A", "B", "A", "B"]
+        y_pred = ["A", "B", "B", "A"]
+        labels = ["A", "B"]
+        result = _compute_metrics(y_true, y_pred, labels, task_type="binary")
+        assert "f1" in result
+        assert "macro_f1" not in result
+
+    def test_evaluate_fallback_when_no_task_type(self):
+        """Without task_type, falls back to len(labels) heuristic."""
+        from auto_llm_predictor.nodes.evaluate import _compute_metrics
+
+        y_true = ["A", "B", "C", "A"]
+        y_pred = ["A", "B", "C", "C"]
+        labels = ["A", "B", "C"]
+        result = _compute_metrics(y_true, y_pred, labels)
+        assert "macro_f1" in result
+        assert "f1" not in result
+

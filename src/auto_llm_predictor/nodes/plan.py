@@ -229,6 +229,28 @@ def _append_missing_closers(s: str) -> str:
     return s
 
 
+def _validated_target_mapping(
+    plan_mapping: dict | None,
+    state_mapping: dict,
+) -> dict:
+    """Ensure the plan's target_mapping does not lose classes from explore.
+
+    If the plan proposes fewer classes than the explore-validated mapping,
+    the original mapping is preserved.  If the plan adds label aliases
+    (same number or more keys), the plan mapping is accepted.
+    """
+    if not plan_mapping:
+        return state_mapping
+    if len(plan_mapping) < len(state_mapping):
+        logger.warning(
+            "Plan target_mapping has %d classes (explore had %d). "
+            "Keeping original mapping to prevent class loss.",
+            len(plan_mapping), len(state_mapping),
+        )
+        return state_mapping
+    return plan_mapping
+
+
 def plan_preparation(state: PipelineState, *, llm) -> dict:
     """Ask the LLM to create a data preparation plan based on the data profile.
 
@@ -349,7 +371,9 @@ def plan_preparation(state: PipelineState, *, llm) -> dict:
         "prep_plan": json.dumps(plan, indent=2),
         "selected_features": plan["selected_features"],
         "dropped_features": final_dropped,
-        "target_mapping": plan.get("target_mapping", state.get("target_mapping", {})),
+        "target_mapping": _validated_target_mapping(
+            plan.get("target_mapping"), state.get("target_mapping", {}),
+        ),
         "messages": [
             HumanMessage(content="[plan_preparation] Plan generated."),
         ],

@@ -20,7 +20,7 @@ Respond ONLY with valid JSON (no markdown fences) in this exact schema:
   "instruction_template": "<the instruction text to use in every example>",
   "input_format": "<description of how to format each row's features as text>",
   "output_format": "<description of how to format the target label>",
-  "target_mapping": {"<raw_value>": "<label>"},
+  "target_mapping": {"<raw_value>": "<label>"}   (MUST include ALL classes from the provided target_mapping),
   "test_ratio": 0.2,
   "balance_strategy": "none | oversample | undersample",
   "data_cleaning_steps": ["step1", "step2", ...],

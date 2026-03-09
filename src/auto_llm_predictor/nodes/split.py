@@ -70,7 +70,7 @@ def split_data(state: PipelineState) -> dict:
         plan = json.loads(state.get("prep_plan", "{}"))
         tc = state.get("training_config", {})
         test_ratio = tc.get("test_ratio", plan.get("test_ratio", 0.2))
-        task_type = state.get("task_type", "binary")
+        task_type = state.get("task_type", "multiclass")
 
         from sklearn.model_selection import train_test_split
 
