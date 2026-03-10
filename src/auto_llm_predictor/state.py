@@ -130,6 +130,9 @@ class PipelineState(TypedDict):
     finetune_succeeded: bool
     """Whether fine-tuning completed successfully."""
 
+    finetune_attempts: int
+    """Number of fine-tuning attempts including auto-resume retries."""
+
     train_predictions_path: str
     """Path to predictions JSONL on the training set."""
 

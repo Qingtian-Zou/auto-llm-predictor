@@ -342,6 +342,7 @@ def create_app() -> FastAPI:
         quantization_bit: int | None = Form(None),
         flash_attn: str = Form("auto"),
         precision: str = Form("bf16"),
+        finetune_retries: int = Form(3),
         xai: bool = Form(False),
     ):
         from auto_llm_predictor.graph import build_graph
@@ -399,6 +400,7 @@ def create_app() -> FastAPI:
             logging_steps=logging_steps, save_steps=save_steps,
             quantization_bit=quantization_bit, flash_attn=flash_attn,
             precision=precision, test_ratio=test_ratio,
+            finetune_retries=finetune_retries,
         )
 
         initial_state = {
@@ -410,6 +412,7 @@ def create_app() -> FastAPI:
             "start_from": "explore_data",
             "messages": [],
             "prep_attempts": 0,
+            "finetune_attempts": 0,
             "auto_cutoff": auto_cutoff,
             "xai_enabled": xai,
             "training_config": _build_training_config(hp_args),

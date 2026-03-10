@@ -205,6 +205,53 @@ def run_llamafactory(
         return False, f"Failed to run llamafactory-cli: {e}"
 
 
+def find_latest_checkpoint(sft_dir: str) -> str | None:
+    """Find the latest HuggingFace Trainer checkpoint directory.
+
+    LlamaFactory saves checkpoints as ``checkpoint-{step}/`` inside the
+    output directory.  Returns the path to the highest-numbered checkpoint,
+    or ``None`` if no checkpoints exist.
+    """
+    import re
+
+    sft_path = Path(sft_dir)
+    if not sft_path.exists():
+        return None
+
+    checkpoints = []
+    for d in sft_path.iterdir():
+        if d.is_dir():
+            m = re.match(r"checkpoint-(\d+)$", d.name)
+            if m:
+                checkpoints.append((int(m.group(1)), d))
+
+    if not checkpoints:
+        return None
+
+    checkpoints.sort(key=lambda x: x[0], reverse=True)
+    return str(checkpoints[0][1])
+
+
+def set_resume_in_yaml(yaml_path: str, resume: bool = True) -> None:
+    """Set or remove ``resume_from_checkpoint`` in a LlamaFactory YAML config.
+
+    Reads the file, parses as YAML, sets the key, and writes back.
+    """
+    import yaml
+
+    path = Path(yaml_path)
+    with open(path) as f:
+        config = yaml.safe_load(f) or {}
+
+    if resume:
+        config["resume_from_checkpoint"] = True
+    else:
+        config.pop("resume_from_checkpoint", None)
+
+    with open(path, "w") as f:
+        yaml.dump(config, f, default_flow_style=False, sort_keys=False)
+
+
 def save_yaml(data: dict | str, path: str) -> None:
     """Save a YAML config (either a dict or raw string) to a file."""
     import yaml

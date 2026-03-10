@@ -71,7 +71,7 @@ graph TD
 | **determine_cutoff** | ⏸ Analyzes training data token lengths; automatically sets optimal cutoff or asks for percentile choice if maximum is very high (>10k tokens) |
 | **generate_lmf_config** | Creates LlamaFactory YAML configs for training and prediction |
 | **review_lmf_config** | ⏸ Human review of hyperparameters before fine-tuning |
-| **run_finetuning** | Executes `llamafactory-cli train` (output streamed live) |
+| **run_finetuning** | Executes `llamafactory-cli train` (output streamed live); auto-resumes from the latest checkpoint on failure (up to `--finetune-retries` times) |
 | **run_prediction** | Runs prediction on train and test splits (output streamed live) |
 | **run_evaluation** | Computes accuracy, F1, confusion matrix via scikit-learn |
 | **run_xai** | *(optional, `--xai`)* Merges the LoRA adapter and runs token-level explanations in priority order: **SHAP** (Shapley values via text-generation pipeline), **TransformerLens** (logit attribution via residual stream decomposition), **Attention** (fallback, eager-mode last-layer weights). All succeeding methods are saved to a unified JSON report. |
@@ -230,6 +230,7 @@ CLI flags override `.env` values when both are specified.
 | `--flash-attn` | `fa2` | Flash attention (`auto`, `fa2`, `disabled`) |
 | `--precision` | `bf16` | Training precision (`bf16` or `fp16`) |
 | `--xai` | off | Run XAI explanations after evaluation — SHAP, TransformerLens, and attention fallback (requires `[train]` deps and GPU) |
+| `--finetune-retries` | `3` | Max auto-resume attempts when fine-tuning fails mid-training; resumes from the latest checkpoint if one exists, otherwise retries from scratch |
 
 ## Human-in-the-Loop Review
 
@@ -316,6 +317,7 @@ cutoff_len: 4096
 - **Automated JSON Repair**: The pipeline includes a robust parsing layer that can automatically repair common LLM errors (e.g., unclosed brackets or trailing commas), significantly reducing pipeline crashes during planning and code generation.
 - **Retry Logic**: All code execution nodes (preparation, balancing) feature automated retries with error feedback loops. On retry, the LLM sees both the error message *and* the previous failed script, enabling more targeted self-correction.
 - **WANDB Disabled by Default**: `WANDB_DISABLED=true` is set automatically when invoking LlamaFactory, so no Weights & Biases API key is required.
+- **Fine-Tuning Auto-Resume**: If `llamafactory-cli train` fails mid-run, the pipeline automatically detects the latest `checkpoint-{step}/` directory, sets `resume_from_checkpoint: true` in the training YAML, and retries — up to `--finetune-retries` times (default 3). When no checkpoint exists, it retries from scratch to handle transient errors.
 - **Cross-Platform Paths**: Checkpoint state is normalized on save/load so runs started on Windows can be resumed on Linux and vice versa.
 - **Human-in-the-Loop**: Checkpoints at every critical stage ensure you can override decisions before expensive GPU resources are consumed.
 

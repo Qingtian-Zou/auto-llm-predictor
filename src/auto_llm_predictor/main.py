@@ -48,6 +48,7 @@ def _build_training_config(args) -> dict:
         "flash_attn": args.flash_attn,
         "precision": args.precision,
         "test_ratio": args.test_ratio,
+        "finetune_max_retries": args.finetune_retries,
     }
 
 
@@ -128,6 +129,8 @@ Examples:
     hp.add_argument("--quantization-bit", type=int, choices=[4, 8], default=None, help="Quantization bits (4 or 8)")
     hp.add_argument("--flash-attn", default="auto", choices=["auto", "fa2", "disabled"], help="Flash attention mode (default: auto)")
     hp.add_argument("--precision", default="bf16", choices=["bf16", "fp16"], help="Training precision (default: bf16)")
+    hp.add_argument("--finetune-retries", type=int, default=3,
+                    help="Max auto-resume attempts when fine-tuning fails mid-training (default: 3)")
 
     args = parser.parse_args()
 
@@ -237,6 +240,7 @@ Examples:
             "start_from": "explore_data",
             "messages": [],
             "prep_attempts": 0,
+            "finetune_attempts": 0,
             "auto_cutoff": args.auto_cutoff,
             "xai_enabled": args.xai,
             "training_config": training_config,

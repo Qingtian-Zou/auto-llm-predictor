@@ -856,3 +856,94 @@ class TestMulticlassPreservation:
         assert "macro_f1" in result
         assert "f1" not in result
 
+
+class TestFindLatestCheckpoint:
+    """Tests for utils.find_latest_checkpoint."""
+
+    def test_no_checkpoints(self, tmp_path):
+        from auto_llm_predictor.utils import find_latest_checkpoint
+
+        sft = tmp_path / "sft"
+        sft.mkdir()
+        assert find_latest_checkpoint(str(sft)) is None
+
+    def test_nonexistent_dir(self, tmp_path):
+        from auto_llm_predictor.utils import find_latest_checkpoint
+
+        assert find_latest_checkpoint(str(tmp_path / "nonexistent")) is None
+
+    def test_single_checkpoint(self, tmp_path):
+        from auto_llm_predictor.utils import find_latest_checkpoint
+
+        sft = tmp_path / "sft"
+        (sft / "checkpoint-500").mkdir(parents=True)
+        result = find_latest_checkpoint(str(sft))
+        assert result is not None
+        assert "checkpoint-500" in result
+
+    def test_multiple_checkpoints_returns_latest(self, tmp_path):
+        from auto_llm_predictor.utils import find_latest_checkpoint
+
+        sft = tmp_path / "sft"
+        for step in [500, 1000, 1500]:
+            (sft / f"checkpoint-{step}").mkdir(parents=True)
+        result = find_latest_checkpoint(str(sft))
+        assert "checkpoint-1500" in result
+
+    def test_ignores_non_checkpoint_dirs(self, tmp_path):
+        from auto_llm_predictor.utils import find_latest_checkpoint
+
+        sft = tmp_path / "sft"
+        sft.mkdir()
+        (sft / "logs").mkdir()
+        (sft / "trainer_state.json").touch()
+        assert find_latest_checkpoint(str(sft)) is None
+
+
+class TestSetResumeInYaml:
+    """Tests for utils.set_resume_in_yaml."""
+
+    def test_sets_resume_true(self, tmp_path):
+        import yaml
+        from auto_llm_predictor.utils import set_resume_in_yaml
+
+        yaml_path = tmp_path / "train.yaml"
+        yaml_path.write_text("model_name_or_path: test\noutput_dir: /tmp/out\n")
+
+        set_resume_in_yaml(str(yaml_path), resume=True)
+
+        with open(yaml_path) as f:
+            config = yaml.safe_load(f)
+        assert config["resume_from_checkpoint"] is True
+        assert config["model_name_or_path"] == "test"
+
+    def test_removes_resume_false(self, tmp_path):
+        import yaml
+        from auto_llm_predictor.utils import set_resume_in_yaml
+
+        yaml_path = tmp_path / "train.yaml"
+        yaml_path.write_text(
+            "model_name_or_path: test\nresume_from_checkpoint: true\n"
+        )
+
+        set_resume_in_yaml(str(yaml_path), resume=False)
+
+        with open(yaml_path) as f:
+            config = yaml.safe_load(f)
+        assert "resume_from_checkpoint" not in config
+
+    def test_idempotent_set(self, tmp_path):
+        import yaml
+        from auto_llm_predictor.utils import set_resume_in_yaml
+
+        yaml_path = tmp_path / "train.yaml"
+        yaml_path.write_text(
+            "model_name_or_path: test\nresume_from_checkpoint: true\n"
+        )
+
+        set_resume_in_yaml(str(yaml_path), resume=True)
+
+        with open(yaml_path) as f:
+            config = yaml.safe_load(f)
+        assert config["resume_from_checkpoint"] is True
+

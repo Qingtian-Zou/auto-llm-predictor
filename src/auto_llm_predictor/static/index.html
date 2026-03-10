@@ -203,6 +203,11 @@
                                 <input type="number" id="save-steps" name="save_steps" value="500"
                                     class="form__input form__input--sm">
                             </div>
+                            <div>
+                                <label class="form__label" for="finetune-retries">Finetune Retries</label>
+                                <input type="number" id="finetune-retries" name="finetune_retries" value="3"
+                                    min="0" max="10" class="form__input form__input--sm">
+                            </div>
                             <div class="form__checkbox-row">
                                 <input type="checkbox" id="use-dora" name="use_dora">
                                 <label for="use-dora">Enable DoRA</label>
