@@ -42,7 +42,9 @@ def run_finetuning(state: PipelineState, config: RunnableConfig) -> dict:
     success = False
     output = ""
 
-    while attempt <= max_retries:
+    infinite = max_retries < 0
+
+    while infinite or attempt <= max_retries:
         attempt += 1
         is_retry = attempt > 1
 
@@ -113,7 +115,7 @@ def run_finetuning(state: PipelineState, config: RunnableConfig) -> dict:
         # Failed
         logger.error("Fine-tuning failed (attempt %d):\n%s", attempt, output[-2000:])
 
-        if attempt > max_retries:
+        if not infinite and attempt > max_retries:
             print("\n" + "=" * 60)
             print("FINE-TUNING FAILED ✗ (all retries exhausted)")
             print("=" * 60 + "\n", flush=True)

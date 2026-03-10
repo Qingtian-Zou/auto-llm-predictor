@@ -130,7 +130,7 @@ Examples:
     hp.add_argument("--flash-attn", default="auto", choices=["auto", "fa2", "disabled"], help="Flash attention mode (default: auto)")
     hp.add_argument("--precision", default="bf16", choices=["bf16", "fp16"], help="Training precision (default: bf16)")
     hp.add_argument("--finetune-retries", type=int, default=3,
-                    help="Max auto-resume attempts when fine-tuning fails mid-training (default: 3)")
+                    help="Max auto-resume attempts when fine-tuning fails mid-training (default: 3; -1 for unlimited)")
 
     args = parser.parse_args()
 
