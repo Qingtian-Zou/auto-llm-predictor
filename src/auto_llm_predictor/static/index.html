@@ -208,6 +208,15 @@
                                 <input type="number" id="finetune-retries" name="finetune_retries" value="3"
                                     min="0" max="10" class="form__input form__input--sm">
                             </div>
+                            <div>
+                                <label class="form__label" for="quantization-bit">Quantization</label>
+                                <select id="quantization-bit" name="quantization_bit"
+                                    class="form__input form__input--sm">
+                                    <option value="" selected>None</option>
+                                    <option value="4">4-bit</option>
+                                    <option value="8">8-bit</option>
+                                </select>
+                            </div>
                             <div class="form__checkbox-row">
                                 <input type="checkbox" id="use-dora" name="use_dora">
                                 <label for="use-dora">Enable DoRA</label>
@@ -399,6 +408,37 @@
                     <input type="text" id="infer-run-dir" placeholder="output/my_dataset/run_20260307_120000"
                         class="form__input" required>
                 </fieldset>
+
+                <!-- Hardware settings (shared across batch & single) -->
+                <details class="form__group form__details">
+                    <summary class="form__legend form__legend--click">Hardware Settings<span
+                            class="chevron">›</span></summary>
+                    <div class="form__grid">
+                        <div>
+                            <label class="form__label" for="infer-precision">Precision</label>
+                            <select id="infer-precision" class="form__input form__input--sm">
+                                <option value="bf16" selected>bf16</option>
+                                <option value="fp16">fp16</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form__label" for="infer-flash-attn">Flash Attn</label>
+                            <select id="infer-flash-attn" class="form__input form__input--sm">
+                                <option value="auto" selected>auto</option>
+                                <option value="fa2">fa2</option>
+                                <option value="disabled">disabled</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="form__label" for="infer-quantization-bit">Quantization</label>
+                            <select id="infer-quantization-bit" class="form__input form__input--sm">
+                                <option value="" selected>None</option>
+                                <option value="4">4-bit</option>
+                                <option value="8">8-bit</option>
+                            </select>
+                        </div>
+                    </div>
+                </details>
 
                 <!-- Inference mode selector -->
                 <fieldset class="form__group">

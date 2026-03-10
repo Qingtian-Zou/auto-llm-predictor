@@ -584,6 +584,10 @@
             fd.append("csv_file", inferCsvFile.files[0]);
             fd.append("output_dir", outputDir);
             fd.append("run_dir", runDir);
+            fd.append("precision", document.getElementById("infer-precision").value);
+            fd.append("flash_attn", document.getElementById("infer-flash-attn").value);
+            const qbitBatch = document.getElementById("infer-quantization-bit").value;
+            if (qbitBatch) fd.append("quantization_bit", qbitBatch);
 
             try {
                 const res = await fetch("/api/infer/batch", { method: "POST", body: fd });
@@ -722,6 +726,9 @@
             fd.append("run_dir", runDir);
             fd.append("features_json", JSON.stringify(features));
             fd.append("xai", xaiEnabled ? "true" : "false");
+            fd.append("precision", document.getElementById("infer-precision").value);
+            const qbitSingle = document.getElementById("infer-quantization-bit").value;
+            if (qbitSingle) fd.append("quantization_bit", qbitSingle);
 
             try {
                 const res = await fetch("/api/infer/single", { method: "POST", body: fd });
