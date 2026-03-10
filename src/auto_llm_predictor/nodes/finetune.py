@@ -31,7 +31,9 @@ def run_finetuning(state: PipelineState, config: RunnableConfig) -> dict:
     """
     yaml_path = state["lmf_train_yaml"]
     sft_dir = state.get("adapter_path", "")
-    log_callback = config.get("configurable", {}).get("log_callback")
+    configurable = config.get("configurable", {})
+    log_callback = configurable.get("log_callback")
+    cancelled_check = configurable.get("cancelled_check")
 
     tc = state.get("training_config", {})
     max_retries = tc.get("finetune_max_retries", 3)
@@ -43,6 +45,11 @@ def run_finetuning(state: PipelineState, config: RunnableConfig) -> dict:
     while attempt <= max_retries:
         attempt += 1
         is_retry = attempt > 1
+
+        # Check for user cancellation before retrying
+        if is_retry and cancelled_check and cancelled_check():
+            logger.info("Fine-tuning cancelled by user — skipping retry.")
+            break
 
         if is_retry:
             latest_ckpt = find_latest_checkpoint(sft_dir)

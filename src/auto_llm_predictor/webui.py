@@ -431,6 +431,7 @@ def create_app() -> FastAPI:
             "configurable": {
                 "thread_id": uuid.uuid4().hex,
                 "log_callback": lambda msg: _emit(run, "log", {"message": msg}),
+                "cancelled_check": lambda: run.cancelled,
             }
         }
         _runs[run_id] = run
