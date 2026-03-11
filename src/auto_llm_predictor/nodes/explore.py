@@ -88,35 +88,44 @@ def explore_data(state: PipelineState, *, llm) -> dict:
             f"JSON error: {e}. Response preview: {raw[:200]}"
         ) from e
 
-    # Validate target_mapping completeness against actual CSV values
-    target_col = analysis["target_column"]
-    try:
-        df = pd.read_csv(csv_path, usecols=[target_col], low_memory=False)
-        actual_values = set(str(v) for v in df[target_col].dropna().unique())
-        mapped_keys = set(str(k) for k in analysis["target_mapping"].keys())
-        missing = actual_values - mapped_keys
-        if missing:
-            logger.warning(
-                "target_mapping is missing %d value(s): %s. Auto-filling.",
-                len(missing), missing,
+    # For regression tasks, target_mapping is not meaningful — force it empty.
+    if analysis["task_type"] == "regression":
+        if analysis.get("target_mapping"):
+            logger.info(
+                "task_type is 'regression'; clearing target_mapping "
+                "(%d entries).", len(analysis["target_mapping"]),
             )
-            for val in sorted(missing):
-                analysis["target_mapping"][val] = val
-        # Reconcile task_type with actual class count
-        n_classes = len(analysis["target_mapping"])
-        if analysis["task_type"] == "binary" and n_classes > 2:
-            logger.warning(
-                "task_type was 'binary' but found %d classes. Correcting to 'multiclass'.",
-                n_classes,
-            )
-            analysis["task_type"] = "multiclass"
-        elif analysis["task_type"] == "multiclass" and n_classes == 2:
-            logger.warning(
-                "task_type was 'multiclass' but found only 2 classes. Correcting to 'binary'.",
-            )
-            analysis["task_type"] = "binary"
-    except Exception as e:
-        logger.warning("Could not validate target_mapping completeness: %s", e)
+        analysis["target_mapping"] = {}
+    else:
+        # Validate target_mapping completeness against actual CSV values
+        target_col = analysis["target_column"]
+        try:
+            df = pd.read_csv(csv_path, usecols=[target_col], low_memory=False)
+            actual_values = set(str(v) for v in df[target_col].dropna().unique())
+            mapped_keys = set(str(k) for k in analysis["target_mapping"].keys())
+            missing = actual_values - mapped_keys
+            if missing:
+                logger.warning(
+                    "target_mapping is missing %d value(s): %s. Auto-filling.",
+                    len(missing), missing,
+                )
+                for val in sorted(missing):
+                    analysis["target_mapping"][val] = val
+            # Reconcile task_type with actual class count
+            n_classes = len(analysis["target_mapping"])
+            if analysis["task_type"] == "binary" and n_classes > 2:
+                logger.warning(
+                    "task_type was 'binary' but found %d classes. Correcting to 'multiclass'.",
+                    n_classes,
+                )
+                analysis["task_type"] = "multiclass"
+            elif analysis["task_type"] == "multiclass" and n_classes == 2:
+                logger.warning(
+                    "task_type was 'multiclass' but found only 2 classes. Correcting to 'binary'.",
+                )
+                analysis["task_type"] = "binary"
+        except Exception as e:
+            logger.warning("Could not validate target_mapping completeness: %s", e)
 
     return {
         "data_profile": data_profile,

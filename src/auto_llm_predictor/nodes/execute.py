@@ -123,7 +123,9 @@ def execute_prep_code(state: PipelineState) -> dict:
 
     # Extract target_mapping from generated script if it succeeds.
     # Only accept it if it does not reduce the number of classes.
-    if files_exist:
+    # Skip for regression tasks where target_mapping is intentionally empty.
+    task_type = state.get("task_type", "")
+    if files_exist and task_type != "regression":
         prep_code = state.get("prep_code", "")
         if prep_code:
             updated_mapping = _extract_target_mapping_from_code(prep_code)

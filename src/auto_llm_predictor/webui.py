@@ -232,16 +232,26 @@ def _format_results(final_state: dict) -> dict:
     eval_results = final_state.get("eval_results", {})
     parts = []
     for split, metrics in eval_results.items():
-        if isinstance(metrics, dict) and "accuracy" in metrics:
-            parts.append({
-                "split": split,
-                "accuracy": metrics["accuracy"],
-                "valid_predictions": metrics.get("valid_predictions"),
-                "total_samples": metrics.get("total_samples"),
-                "f1": metrics.get("f1"),
-                "macro_f1": metrics.get("macro_f1"),
-                "weighted_f1": metrics.get("weighted_f1"),
-            })
+        if not isinstance(metrics, dict) or "error" in metrics:
+            continue
+        entry = {
+            "split": split,
+            "valid_predictions": metrics.get("valid_predictions"),
+            "total_samples": metrics.get("total_samples"),
+        }
+        # Classification metrics
+        if "accuracy" in metrics:
+            entry["accuracy"] = metrics["accuracy"]
+            entry["f1"] = metrics.get("f1")
+            entry["macro_f1"] = metrics.get("macro_f1")
+            entry["weighted_f1"] = metrics.get("weighted_f1")
+        # Regression metrics
+        if "mae" in metrics:
+            entry["mae"] = metrics["mae"]
+            entry["mse"] = metrics["mse"]
+            entry["rmse"] = metrics["rmse"]
+            entry["r2"] = metrics["r2"]
+        parts.append(entry)
     return {
         "message": "Pipeline complete!",
         "run_dir": final_state.get("run_dir", ""),

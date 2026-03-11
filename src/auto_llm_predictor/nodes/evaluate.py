@@ -97,6 +97,27 @@ def _compute_metrics(y_true: list[str], y_pred: list[str], labels: list[str], ta
     return results
 
 
+def _compute_regression_metrics(y_true: list[float], y_pred: list[float]) -> dict:
+    """Compute regression metrics (MAE, MSE, RMSE, R²)."""
+    from sklearn.metrics import (
+        mean_absolute_error,
+        mean_squared_error,
+        r2_score,
+    )
+    import math
+
+    mse = mean_squared_error(y_true, y_pred)
+    return {
+        "total_samples": len(y_true),
+        "valid_predictions": len(y_true),
+        "invalid_predictions": 0,
+        "mae": mean_absolute_error(y_true, y_pred),
+        "mse": mse,
+        "rmse": math.sqrt(mse),
+        "r2": r2_score(y_true, y_pred),
+    }
+
+
 def run_evaluation(state: PipelineState) -> dict:
     """Evaluate predictions on the test set.
 
@@ -119,37 +140,69 @@ def run_evaluation(state: PipelineState) -> dict:
         predictions = load_jsonl(pred_path)
         logger.info("Loaded %d predictions for %s set", len(predictions), split)
 
-        y_true = []
-        y_pred = []
+        if task_type == "regression":
+            # ── Regression evaluation ──────────────────────────────
+            y_true_f: list[float] = []
+            y_pred_f: list[float] = []
 
-        for entry in predictions:
-            # LlamaFactory predict format: {"predict": "...", "label": "..."}
-            raw_pred = entry.get("predict", entry.get("prediction", ""))
-            raw_label = entry.get("label", entry.get("ground_truth", ""))
+            for entry in predictions:
+                raw_pred = entry.get("predict", entry.get("prediction", "")).strip()
+                raw_label = entry.get("label", entry.get("ground_truth", "")).strip()
+                try:
+                    y_true_f.append(float(raw_label))
+                except (ValueError, TypeError):
+                    continue
+                try:
+                    y_pred_f.append(float(raw_pred))
+                except (ValueError, TypeError):
+                    y_pred_f.append(float("nan"))
 
-            true_label = _extract_label(raw_label, target_mapping)
-            pred_label = _extract_label(raw_pred, target_mapping)
-
-            if true_label is not None:
-                y_true.append(true_label)
-                y_pred.append(pred_label if pred_label is not None else "UNPARSED")
-
-        if y_true:
-            # If target_mapping was empty, infer the valid labels from the ground truth
-            all_labels = labels if labels else sorted(list(set(y_true)))
-            
-            # Identify valid labels based on the true distribution
-            # If the user-provided a mapped target list, we use that. Else the unique truth labels.
-            if "UNPARSED" not in all_labels:
-                all_labels_with_unparsed = all_labels + ["UNPARSED"]
+            # Drop pairs where prediction is NaN
+            valid_pairs = [
+                (t, p) for t, p in zip(y_true_f, y_pred_f)
+                if not (p != p)  # NaN check
+            ]
+            if valid_pairs:
+                yt, yp = zip(*valid_pairs)
+                metrics = _compute_regression_metrics(list(yt), list(yp))
+                metrics["invalid_predictions"] = len(y_true_f) - len(valid_pairs)
+                metrics["total_samples"] = len(predictions)
+                results[split] = metrics
+                logger.info("%s evaluation: MAE=%.4f, R²=%.4f",
+                            split, metrics["mae"], metrics["r2"])
             else:
-                all_labels_with_unparsed = all_labels
-
-            metrics = _compute_metrics(y_true, y_pred, all_labels_with_unparsed, task_type=task_type)
-            results[split] = metrics
-            logger.info("%s evaluation: accuracy=%.4f", split, metrics.get("accuracy", 0))
+                results[split] = {"error": "No valid numeric predictions to evaluate"}
         else:
-            results[split] = {"error": "No valid labels found in predictions"}
+            # ── Classification evaluation ──────────────────────────
+            y_true = []
+            y_pred = []
+
+            for entry in predictions:
+                raw_pred = entry.get("predict", entry.get("prediction", ""))
+                raw_label = entry.get("label", entry.get("ground_truth", ""))
+
+                true_label = _extract_label(raw_label, target_mapping)
+                pred_label = _extract_label(raw_pred, target_mapping)
+
+                if true_label is not None:
+                    y_true.append(true_label)
+                    y_pred.append(pred_label if pred_label is not None else "UNPARSED")
+
+            if y_true:
+                # If target_mapping was empty, infer the valid labels from the ground truth
+                all_labels = labels if labels else sorted(list(set(y_true)))
+
+                # Identify valid labels based on the true distribution
+                if "UNPARSED" not in all_labels:
+                    all_labels_with_unparsed = all_labels + ["UNPARSED"]
+                else:
+                    all_labels_with_unparsed = all_labels
+
+                metrics = _compute_metrics(y_true, y_pred, all_labels_with_unparsed, task_type=task_type)
+                results[split] = metrics
+                logger.info("%s evaluation: accuracy=%.4f", split, metrics.get("accuracy", 0))
+            else:
+                results[split] = {"error": "No valid labels found in predictions"}
 
     # Save evaluation results
     run_dir = Path(state.get("run_dir", state["output_dir"]))
@@ -165,25 +218,38 @@ def run_evaluation(state: PipelineState) -> dict:
     print("Evaluation Results")
     print("=" * 60)
     for split, metrics in results.items():
-        if isinstance(metrics, dict) and "accuracy" in metrics:
+        if isinstance(metrics, dict) and "error" not in metrics:
             print(f"\n{split.upper()} Results:")
-            print(f"  Accuracy:           {metrics['accuracy']:.4f}")
-            print(f"  Valid predictions:   {metrics['valid_predictions']}/{metrics['total_samples']}")
-            if "f1" in metrics:
-                print(f"  F1 Score:           {metrics['f1']:.4f}")
-            if "macro_f1" in metrics:
-                print(f"  Macro F1:           {metrics['macro_f1']:.4f}")
-                print(f"  Weighted F1:        {metrics['weighted_f1']:.4f}")
+            if task_type == "regression":
+                print(f"  MAE:                {metrics['mae']:.4f}")
+                print(f"  MSE:                {metrics['mse']:.4f}")
+                print(f"  RMSE:               {metrics['rmse']:.4f}")
+                print(f"  R²:                 {metrics['r2']:.4f}")
+                print(f"  Valid predictions:   {metrics['valid_predictions']}/{metrics['total_samples']}")
+            else:
+                print(f"  Accuracy:           {metrics['accuracy']:.4f}")
+                print(f"  Valid predictions:   {metrics['valid_predictions']}/{metrics['total_samples']}")
+                if "f1" in metrics:
+                    print(f"  F1 Score:           {metrics['f1']:.4f}")
+                if "macro_f1" in metrics:
+                    print(f"  Macro F1:           {metrics['macro_f1']:.4f}")
+                    print(f"  Weighted F1:        {metrics['weighted_f1']:.4f}")
     print("=" * 60)
 
     # Build summary message
     summary_parts = []
     for split, metrics in results.items():
-        if "accuracy" in metrics:
-            summary_parts.append(
-                f"{split}: accuracy={metrics['accuracy']:.4f}, "
-                f"valid={metrics['valid_predictions']}/{metrics['total_samples']}"
-            )
+        if "error" not in metrics:
+            if task_type == "regression":
+                summary_parts.append(
+                    f"{split}: MAE={metrics['mae']:.4f}, R²={metrics['r2']:.4f}, "
+                    f"valid={metrics['valid_predictions']}/{metrics['total_samples']}"
+                )
+            else:
+                summary_parts.append(
+                    f"{split}: accuracy={metrics['accuracy']:.4f}, "
+                    f"valid={metrics['valid_predictions']}/{metrics['total_samples']}"
+                )
     summary = "; ".join(summary_parts) if summary_parts else "No valid evaluations"
 
     return {

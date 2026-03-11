@@ -371,8 +371,12 @@ def plan_preparation(state: PipelineState, *, llm) -> dict:
         "prep_plan": json.dumps(plan, indent=2),
         "selected_features": plan["selected_features"],
         "dropped_features": final_dropped,
-        "target_mapping": _validated_target_mapping(
-            plan.get("target_mapping"), state.get("target_mapping", {}),
+        "target_mapping": (
+            {}
+            if state.get("task_type") == "regression"
+            else _validated_target_mapping(
+                plan.get("target_mapping"), state.get("target_mapping", {}),
+            )
         ),
         "messages": [
             HumanMessage(content="[plan_preparation] Plan generated."),
