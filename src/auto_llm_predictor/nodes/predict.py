@@ -65,7 +65,7 @@ def run_prediction(state: PipelineState, config: RunnableConfig) -> dict:
         print(f"Config: {yaml_path}")
         print("=" * 60 + "\n", flush=True)
 
-        success, output = run_llamafactory(
+        success, _, output = run_llamafactory(
             yaml_path, timeout=3600, stream=True, log_callback=log_callback
         )
 

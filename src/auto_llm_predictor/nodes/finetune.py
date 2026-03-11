@@ -98,7 +98,7 @@ def run_finetuning(state: PipelineState, config: RunnableConfig) -> dict:
             print(f"Config: {yaml_path}")
             print("=" * 60 + "\n", flush=True)
 
-        success, output = run_llamafactory(
+        success, return_code, output = run_llamafactory(
             yaml_path,
             timeout=7200,
             stream=True,
@@ -113,7 +113,7 @@ def run_finetuning(state: PipelineState, config: RunnableConfig) -> dict:
             break
 
         # Failed
-        logger.error("Fine-tuning failed (attempt %d):\n%s", attempt, output[-2000:])
+        logger.error("Fine-tuning failed (attempt %d, return code %d):\n%s", attempt, return_code, output[-2000:])
 
         if not infinite and attempt > max_retries:
             print("\n" + "=" * 60)

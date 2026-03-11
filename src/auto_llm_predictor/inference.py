@@ -261,7 +261,7 @@ def run_batch_inference(
     print(f"Config: {yaml_path}")
     print("=" * 60 + "\n", flush=True)
 
-    success, lmf_output = run_llamafactory(
+    success, _, lmf_output = run_llamafactory(
         yaml_path, timeout=7200, stream=True, log_callback=log_callback,
     )
 

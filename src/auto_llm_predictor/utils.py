@@ -114,7 +114,7 @@ def run_llamafactory(
     stream: bool = True,
     tail_chars: int = 5000,
     log_callback: callable | None = None,
-) -> tuple[bool, str]:
+) -> tuple[bool, int | None, str]:
     """Run llamafactory-cli train with a YAML config.
 
     When *stream* is True (default), stdout and stderr are printed in
@@ -122,7 +122,7 @@ def run_llamafactory(
     last *tail_chars* characters of the combined output are returned
     for downstream state storage.
 
-    Returns (success, output_tail).  Timeout defaults to 2 hours.
+    Returns (success, return_code, output_tail).  Timeout defaults to 2 hours.
     """
     import os
     import sys
@@ -144,11 +144,11 @@ def run_llamafactory(
             if result.stderr:
                 stderr_tail = result.stderr[-3000:] if len(result.stderr) > 3000 else result.stderr
                 output += "\n--- STDERR (tail) ---\n" + stderr_tail
-            return result.returncode == 0, output
+            return result.returncode == 0, result.returncode, output
         except subprocess.TimeoutExpired:
-            return False, f"llamafactory-cli timed out after {timeout}s"
+            return False, None, f"llamafactory-cli timed out after {timeout}s"
         except Exception as e:
-            return False, f"Failed to run llamafactory-cli: {e}"
+            return False, None, f"Failed to run llamafactory-cli: {e}"
 
     # ── Streaming mode: print output live ─────────────────────
     output_lines: deque[str] = deque(maxlen=200)  # keep last 200 lines
@@ -195,14 +195,14 @@ def run_llamafactory(
         if len(output_tail) > tail_chars:
             output_tail = output_tail[-tail_chars:]
 
-        return proc.returncode == 0, output_tail
+        return proc.returncode == 0, proc.returncode, output_tail
 
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
-        return False, f"llamafactory-cli timed out after {timeout}s"
+        return False, proc.returncode, f"llamafactory-cli timed out after {timeout}s"
     except Exception as e:
-        return False, f"Failed to run llamafactory-cli: {e}"
+        return False, None, f"Failed to run llamafactory-cli: {e}"
 
 
 def find_latest_checkpoint(sft_dir: str) -> str | None:
