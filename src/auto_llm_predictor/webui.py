@@ -63,6 +63,7 @@ class RunState:
     error: str = ""
     interrupt_summary: str = ""       # review text shown to the user
     events: list[dict] = field(default_factory=list)
+    _events_lock: threading.Lock = field(default_factory=threading.Lock)
     queue: asyncio.Queue | None = None
     thread: threading.Thread | None = None
     # LangGraph handles
@@ -77,6 +78,20 @@ class RunState:
 
 
 _runs: dict[str, RunState] = {}
+_MAX_COMPLETED_RUNS = 50
+
+
+def _prune_completed_runs() -> None:
+    """Remove oldest completed/error runs when the history exceeds the limit."""
+    finished = [
+        rid for rid, r in _runs.items()
+        if r.status in ("completed", "error")
+    ]
+    excess = len(finished) - _MAX_COMPLETED_RUNS
+    if excess > 0:
+        for rid in finished[:excess]:
+            del _runs[rid]
+
 
 # ---------------------------------------------------------------------------
 # SSE helper
@@ -86,7 +101,8 @@ def _emit(run: RunState, event_type: str, data: dict | str) -> None:
     """Push an event both to the in-memory log and the async queue."""
     payload = data if isinstance(data, dict) else {"message": data}
     evt = {"event": event_type, **payload}
-    run.events.append(evt)
+    with run._events_lock:
+        run.events.append(evt)
     if run.queue and run.loop:
         run.loop.call_soon_threadsafe(run.queue.put_nowait, evt)
 
@@ -444,6 +460,7 @@ def create_app() -> FastAPI:
                 "cancelled_check": lambda: run.cancelled,
             }
         }
+        _prune_completed_runs()
         _runs[run_id] = run
 
         t = threading.Thread(
@@ -465,7 +482,9 @@ def create_app() -> FastAPI:
 
         async def generate():
             # Replay any events that already happened
-            for evt in list(run.events):
+            with run._events_lock:
+                replay_events = list(run.events)
+            for evt in replay_events:
                 yield f"data: {json.dumps(evt)}\n\n"
 
             # Drain stale events from the queue (since we already replayed them from run.events)
@@ -597,10 +616,17 @@ def create_app() -> FastAPI:
         path_str = state.get(key)
         if not path_str or not Path(path_str).is_file():
             return JSONResponse(status_code=404, content={"error": "Artifact file not found or not yet available."})
-        
-        path = Path(path_str)
+
+        path = Path(path_str).resolve()
+        # Ensure the file is within the run's output directory
+        output_dir = state.get("output_dir", "")
+        if output_dir:
+            allowed_base = Path(output_dir).resolve()
+            if not str(path).startswith(str(allowed_base)):
+                return JSONResponse(status_code=403, content={"error": "Access denied: file is outside the run directory."})
+
         return FileResponse(
-            path=path, 
+            path=path,
             filename=path.name,
             media_type="application/octet-stream"
         )
@@ -652,6 +678,7 @@ def create_app() -> FastAPI:
             queue=asyncio.Queue(),
             loop=loop,
         )
+        _prune_completed_runs()
         _runs[run_id] = run
 
         t = threading.Thread(

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +47,16 @@ def save_state(state: dict[str, Any], output_dir: str) -> str:
         except (TypeError, ValueError):
             logger.debug("Skipping non-serializable field: %s", key)
 
-    state_path.write_text(json.dumps(serializable, indent=2))
+    # Write atomically: temp file + rename to avoid corruption on crash
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(dir=state_path.parent, suffix=".tmp")
+    try:
+        with open(fd, "w") as f:
+            json.dump(serializable, f, indent=2)
+        Path(tmp_path).replace(state_path)
+    except BaseException:
+        Path(tmp_path).unlink(missing_ok=True)
+        raise
     logger.info("Saved pipeline state to %s (%d fields)", state_path, len(serializable))
     return str(state_path)
 

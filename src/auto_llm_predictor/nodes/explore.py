@@ -66,7 +66,8 @@ def explore_data(state: PipelineState, *, llm) -> dict:
     # Parse the JSON response — extract JSON object robustly
     # Strip markdown fences if present
     if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1]
+        parts = raw.split("\n", 1)
+        raw = parts[1] if len(parts) > 1 else ""
         if raw.endswith("```"):
             raw = raw[: raw.rfind("```")]
         raw = raw.strip()

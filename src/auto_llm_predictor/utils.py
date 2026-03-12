@@ -19,7 +19,6 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
-import textwrap
 from pathlib import Path
 
 import pandas as pd
@@ -200,6 +199,9 @@ def run_llamafactory(
     except subprocess.TimeoutExpired:
         proc.kill()
         proc.wait()
+        # Ensure reader threads finish before returning
+        stdout_thread.join(timeout=5)
+        stderr_thread.join(timeout=5)
         return False, proc.returncode, f"llamafactory-cli timed out after {timeout}s"
     except Exception as e:
         return False, None, f"Failed to run llamafactory-cli: {e}"

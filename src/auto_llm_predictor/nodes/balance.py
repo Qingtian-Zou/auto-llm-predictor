@@ -81,7 +81,8 @@ def write_balance_code(state: PipelineState, *, llm) -> dict:
 
     # Strip markdown fences
     if code.startswith("```"):
-        code = code.split("\n", 1)[1]
+        parts = code.split("\n", 1)
+        code = parts[1] if len(parts) > 1 else ""
         if code.endswith("```"):
             code = code[: code.rfind("```")]
         code = code.strip()
@@ -134,7 +135,7 @@ def execute_balance_code(state: PipelineState) -> dict:
         }
 
     logger.info("Running balance script: %s", script_path)
-    success, output = run_script(script_path, timeout=120)
+    success, output = run_script(script_path, timeout=600)
 
     if success:
         # Verify balanced_data.json exists and is valid

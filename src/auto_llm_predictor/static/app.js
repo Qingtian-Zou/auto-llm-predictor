@@ -181,7 +181,7 @@
                     exportMenu.innerHTML = '<div class="dropdown__item dropdown__item--disabled">No artifacts available yet</div>';
                 }
             } catch (err) {
-                exportMenu.innerHTML = `<div class="dropdown__item dropdown__item--disabled">Error: ${err.message}</div>`;
+                exportMenu.innerHTML = `<div class="dropdown__item dropdown__item--disabled">Error: ${escapeHtml(err.message)}</div>`;
             }
         } else {
             exportMenu.classList.add("dropdown__menu--hidden");
@@ -195,20 +195,30 @@
     });
 
     // ── SSE connection ──────────────────────────────────────────
+    let sseRetries = 0;
+    const SSE_MAX_RETRIES = 5;
+
     function connectSSE(runId) {
         if (evtSource) evtSource.close();
+        sseRetries = 0;
         evtSource = new EventSource(`/api/events/${runId}`);
 
         evtSource.onmessage = (e) => {
+            sseRetries = 0; // reset on successful message
             let evt;
             try { evt = JSON.parse(e.data); } catch { return; }
             handleEvent(evt);
         };
 
         evtSource.onerror = () => {
-            // EventSource will auto-reconnect; if stale, just close
             if (evtSource.readyState === EventSource.CLOSED) {
                 appendLog("SSE connection closed.", "status");
+            } else {
+                sseRetries++;
+                if (sseRetries >= SSE_MAX_RETRIES) {
+                    evtSource.close();
+                    appendLog("SSE connection lost after " + SSE_MAX_RETRIES + " retries.", "error");
+                }
             }
         };
     }
@@ -681,8 +691,8 @@
                 let html = "";
                 for (const feat of loadedFeatures) {
                     html += '<div class="feature-input-row">';
-                    html += '<label class="form__label">' + feat + '</label>';
-                    html += '<input type="text" class="form__input feature-value" data-feature="' + feat + '" placeholder="Enter value">';
+                    html += '<label class="form__label">' + escapeHtml(feat) + '</label>';
+                    html += '<input type="text" class="form__input feature-value" data-feature="' + escapeHtml(feat) + '" placeholder="Enter value">';
                     html += '</div>';
                 }
                 featureInputsDiv.innerHTML = html;
@@ -744,7 +754,7 @@
                 // Show result
                 let html = '<div class="single-prediction">';
                 html += '<p class="prediction-label">Prediction</p>';
-                html += '<p class="prediction-value">' + (data.prediction || "—") + '</p>';
+                html += '<p class="prediction-value">' + escapeHtml(data.prediction || "—") + '</p>';
 
                 if (data.target_mapping && Object.keys(data.target_mapping).length) {
                     html += '<p class="prediction-mapping"><small>Target mapping: ' +
@@ -762,7 +772,7 @@
                             html += '<table class="xai-tokens"><thead><tr><th>Token</th><th>Score</th></tr></thead><tbody>';
                             for (const ts of explanations[0].token_scores.slice(0, 15)) {
                                 const barWidth = Math.min(100, Math.round(ts.score * 1000));
-                                html += '<tr><td class="xai-token">' + ts.token + '</td>';
+                                html += '<tr><td class="xai-token">' + escapeHtml(ts.token) + '</td>';
                                 html += '<td class="xai-score"><div class="xai-bar" style="width:' + barWidth + '%"></div>';
                                 html += '<span>' + ts.score.toFixed(6) + '</span></td></tr>';
                             }

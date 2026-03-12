@@ -61,7 +61,8 @@ def write_prep_code(state: PipelineState, *, llm) -> dict:
     # Strip markdown fences if present
     if code.startswith("```"):
         # Remove first line (```python or ```)
-        code = code.split("\n", 1)[1]
+        parts = code.split("\n", 1)
+        code = parts[1] if len(parts) > 1 else ""
         if code.endswith("```"):
             code = code[: code.rfind("```")]
         code = code.strip()

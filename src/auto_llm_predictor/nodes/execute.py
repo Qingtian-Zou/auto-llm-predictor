@@ -60,7 +60,13 @@ def execute_prep_code(state: PipelineState) -> dict:
 
     Writes: prep_result, prep_succeeded, all_data_path, dataset_info_path, target_mapping, messages
     """
-    script_path = state["prep_code_path"]
+    script_path = state.get("prep_code_path", "")
+    if not script_path:
+        return {
+            "prep_result": "No prep script path found in state.",
+            "prep_succeeded": False,
+            "messages": [HumanMessage(content="[execute_prep_code] No prep script path available.")],
+        }
     output_data_dir = Path(state["output_dir"]) / "data"
 
     logger.info("Executing prep script: %s", script_path)
@@ -158,7 +164,10 @@ def check_prep_result(state: PipelineState) -> str:
         return "verify_prepared_data"
 
     if state.get("prep_attempts", 0) >= 3:
-        logger.warning("Max prep attempts reached. Proceeding to review anyway.")
+        logger.error(
+            "Max prep attempts (%d) reached — data preparation may be incomplete.",
+            state.get("prep_attempts", 0),
+        )
         return "verify_prepared_data"
 
     return "write_prep_code"
