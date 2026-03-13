@@ -97,9 +97,12 @@
                     <!-- Model -->
                     <fieldset class="form__group">
                         <legend class="form__legend">Model</legend>
-                        <label class="form__label" for="model">HuggingFace Model ID <span class="req">*</span></label>
+                        <label class="form__label" for="model">Model (HuggingFace ID or Local Path) <span class="req">*</span></label>
                         <input type="text" id="model" name="model" value="mistralai/Mistral-7B-Instruct-v0.3"
-                            placeholder="mistralai/Mistral-7B-Instruct-v0.3" required class="form__input">
+                            placeholder="org/model-name or /path/to/local/model" required class="form__input">
+                        <label class="form__label" for="template">Chat Template <span class="form__optional">(auto-detect if empty)</span></label>
+                        <input type="text" id="template" name="template"
+                            placeholder="e.g. llama3, qwen, mistral" class="form__input">
                     </fieldset>
 
                     <!-- Agent LLM (collapsible) -->

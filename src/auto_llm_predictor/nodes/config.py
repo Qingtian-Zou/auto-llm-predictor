@@ -24,7 +24,12 @@ TEMPLATE_MAP = {
 
 
 def _guess_template(model_name: str) -> str:
-    """Guess the chat template from the model name."""
+    """Guess the chat template from the model name or local config.json."""
+    from auto_llm_predictor.utils import detect_template_from_config, is_local_model
+
+    if is_local_model(model_name):
+        return detect_template_from_config(model_name)
+
     model_lower = model_name.lower()
     for key, template in TEMPLATE_MAP.items():
         if key in model_lower:
@@ -66,14 +71,15 @@ def generate_lmf_config(state: PipelineState) -> dict:
     config_dir.mkdir(parents=True, exist_ok=True)
 
     model = state["base_model"]
-    template = _guess_template(model)
+    tc = dict(state.get("training_config", {}))
+    template = tc.get("template") or _guess_template(model)
+    tc["template"] = template
     sft_dir = str(run_dir / "sft")
     sft_logs_dir = str(run_dir / "sft" / "logs")
     predict_train_dir = str(run_dir / "predict_train")
     predict_test_dir = str(run_dir / "predict_test")
 
     # Pull training hyperparameters from CLI (with defaults)
-    tc = state.get("training_config", {})
     lora_rank = tc.get("lora_rank", 64)
     lora_alpha = tc.get("lora_alpha", 128)
     use_dora = str(tc.get("use_dora", False)).lower()
@@ -227,6 +233,7 @@ flash_attn: {flash_attn}
         "lmf_predict_train_yaml": predict_train_path,
         "lmf_predict_test_yaml": predict_test_path,
         "adapter_path": sft_dir,
+        "training_config": tc,
         "messages": [
             HumanMessage(
                 content=f"[generate_lmf_config] Created 3 YAML configs in {config_dir}. "

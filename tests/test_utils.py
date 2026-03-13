@@ -249,3 +249,126 @@ class TestUnusedImports:
         # textwrap should no longer be imported (it was unused)
         lines = [l.strip() for l in source.splitlines() if l.strip().startswith("import textwrap")]
         assert lines == [], f"textwrap is still imported: {lines}"
+
+
+# ---------------------------------------------------------------------------
+# is_local_model
+# ---------------------------------------------------------------------------
+
+class TestIsLocalModel:
+    """Tests for utils.is_local_model."""
+
+    def test_existing_directory_returns_true(self, tmp_path):
+        from auto_llm_predictor.utils import is_local_model
+
+        assert is_local_model(str(tmp_path)) is True
+
+    def test_huggingface_id_returns_false(self):
+        from auto_llm_predictor.utils import is_local_model
+
+        assert is_local_model("mistralai/Mistral-7B-Instruct-v0.3") is False
+
+    def test_nonexistent_path_returns_false(self):
+        from auto_llm_predictor.utils import is_local_model
+
+        assert is_local_model("/nonexistent/path/to/model") is False
+
+
+# ---------------------------------------------------------------------------
+# validate_local_model
+# ---------------------------------------------------------------------------
+
+class TestValidateLocalModel:
+    """Tests for utils.validate_local_model."""
+
+    def test_valid_model_dir(self, tmp_path):
+        from auto_llm_predictor.utils import validate_local_model
+
+        (tmp_path / "config.json").write_text("{}")
+        (tmp_path / "model.safetensors").write_text("")
+        (tmp_path / "tokenizer.json").write_text("{}")
+        assert validate_local_model(str(tmp_path)) == []
+
+    def test_missing_config_json(self, tmp_path):
+        from auto_llm_predictor.utils import validate_local_model
+
+        (tmp_path / "model.safetensors").write_text("")
+        (tmp_path / "tokenizer.json").write_text("{}")
+        errors = validate_local_model(str(tmp_path))
+        assert len(errors) == 1
+        assert "config.json" in errors[0]
+
+    def test_missing_weights(self, tmp_path):
+        from auto_llm_predictor.utils import validate_local_model
+
+        (tmp_path / "config.json").write_text("{}")
+        (tmp_path / "tokenizer.json").write_text("{}")
+        errors = validate_local_model(str(tmp_path))
+        assert len(errors) == 1
+        assert "weights" in errors[0].lower()
+
+    def test_missing_tokenizer(self, tmp_path):
+        from auto_llm_predictor.utils import validate_local_model
+
+        (tmp_path / "config.json").write_text("{}")
+        (tmp_path / "model.safetensors").write_text("")
+        errors = validate_local_model(str(tmp_path))
+        assert len(errors) == 1
+        assert "tokenizer" in errors[0].lower()
+
+    def test_all_missing(self, tmp_path):
+        from auto_llm_predictor.utils import validate_local_model
+
+        errors = validate_local_model(str(tmp_path))
+        assert len(errors) == 3
+
+    def test_sharded_weights_accepted(self, tmp_path):
+        from auto_llm_predictor.utils import validate_local_model
+
+        (tmp_path / "config.json").write_text("{}")
+        (tmp_path / "model.safetensors.index.json").write_text("{}")
+        (tmp_path / "tokenizer_config.json").write_text("{}")
+        assert validate_local_model(str(tmp_path)) == []
+
+
+# ---------------------------------------------------------------------------
+# detect_template_from_config
+# ---------------------------------------------------------------------------
+
+class TestDetectTemplateFromConfig:
+    """Tests for utils.detect_template_from_config."""
+
+    def test_llama_model_type(self, tmp_path):
+        from auto_llm_predictor.utils import detect_template_from_config
+
+        (tmp_path / "config.json").write_text('{"model_type": "llama"}')
+        assert detect_template_from_config(str(tmp_path)) == "llama3"
+
+    def test_qwen2_model_type(self, tmp_path):
+        from auto_llm_predictor.utils import detect_template_from_config
+
+        (tmp_path / "config.json").write_text('{"model_type": "qwen2"}')
+        assert detect_template_from_config(str(tmp_path)) == "qwen"
+
+    def test_mistral_model_type(self, tmp_path):
+        from auto_llm_predictor.utils import detect_template_from_config
+
+        (tmp_path / "config.json").write_text('{"model_type": "mistral"}')
+        assert detect_template_from_config(str(tmp_path)) == "mistral"
+
+    def test_unknown_model_type(self, tmp_path):
+        from auto_llm_predictor.utils import detect_template_from_config
+
+        (tmp_path / "config.json").write_text('{"model_type": "unknown_arch"}')
+        assert detect_template_from_config(str(tmp_path)) == "default"
+
+    def test_missing_config_json(self, tmp_path):
+        from auto_llm_predictor.utils import detect_template_from_config
+
+        assert detect_template_from_config(str(tmp_path)) == "default"
+
+    def test_malformed_config_json(self, tmp_path):
+        from auto_llm_predictor.utils import detect_template_from_config
+
+        (tmp_path / "config.json").write_text("not valid json {{")
+        assert detect_template_from_config(str(tmp_path)) == "default"

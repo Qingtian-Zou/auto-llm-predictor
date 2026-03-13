@@ -176,7 +176,7 @@ def run_batch_inference(
     state = _load_pipeline_state(output_dir)
     base_model = state.get("base_model", "")
     adapter_path = normalize_path(state.get("adapter_path", str(Path(run_dir) / "sft")))
-    template = _guess_template(base_model)
+    template = state.get("training_config", {}).get("template") or _guess_template(base_model)
     cutoff_len = state.get("cutoff_len") or state.get("training_config", {}).get("cutoff_len", 4096)
     training_config = state.get("training_config", {})
 
@@ -416,7 +416,7 @@ def run_single_inference(
     model, tokenizer = _merge_and_load(base_model, adapter_path, tc)
 
     # ── Generate prediction ────────────────────────────────────
-    template = _guess_template(base_model)
+    template = state.get("training_config", {}).get("template") or _guess_template(base_model)
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=4096)
     inputs = {k: v.to(model.device) for k, v in inputs.items()}
 

@@ -275,3 +275,82 @@ def load_jsonl(path: str) -> list[dict]:
             if line:
                 entries.append(json.loads(line))
     return entries
+
+
+# ---------------------------------------------------------------------------
+# Local model utilities
+# ---------------------------------------------------------------------------
+
+def is_local_model(model: str) -> bool:
+    """Check whether a model specifier is a local filesystem path."""
+    return Path(model).is_dir()
+
+
+_WEIGHT_FILES = (
+    "model.safetensors",
+    "pytorch_model.bin",
+    "model.safetensors.index.json",
+    "pytorch_model.bin.index.json",
+)
+
+_TOKENIZER_FILES = (
+    "tokenizer.json",
+    "tokenizer.model",
+    "tokenizer_config.json",
+)
+
+
+def validate_local_model(model_path: str) -> list[str]:
+    """Validate that a local model directory has the required files.
+
+    Returns a list of error strings (empty means the directory is valid).
+    """
+    errors: list[str] = []
+    p = Path(model_path)
+
+    if not (p / "config.json").is_file():
+        errors.append("Missing config.json (required for model architecture).")
+
+    if not any((p / f).is_file() for f in _WEIGHT_FILES):
+        errors.append(
+            "Missing model weights. Expected at least one of: "
+            + ", ".join(_WEIGHT_FILES)
+        )
+
+    if not any((p / f).is_file() for f in _TOKENIZER_FILES):
+        errors.append(
+            "Missing tokenizer files. Expected at least one of: "
+            + ", ".join(_TOKENIZER_FILES)
+        )
+
+    return errors
+
+
+# Maps config.json "model_type" values to LlamaFactory chat templates.
+_MODEL_TYPE_MAP = {
+    "llama": "llama3",
+    "qwen2": "qwen",
+    "qwen": "qwen",
+    "gemma": "gemma",
+    "gemma2": "gemma",
+    "mistral": "mistral",
+    "phi": "phi",
+    "phi3": "phi",
+    "deepseek": "deepseek",
+}
+
+
+def detect_template_from_config(model_path: str) -> str:
+    """Detect the LlamaFactory chat template from a local model's config.json.
+
+    Reads the ``model_type`` field and maps it to a known template name.
+    Returns ``"default"`` if detection fails.
+    """
+    config_file = Path(model_path) / "config.json"
+    try:
+        with open(config_file) as f:
+            config = json.load(f)
+        model_type = config.get("model_type", "")
+        return _MODEL_TYPE_MAP.get(model_type, "default")
+    except Exception:
+        return "default"

@@ -44,7 +44,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.responses import StreamingResponse
 
-from auto_llm_predictor.utils import normalize_path
+from auto_llm_predictor.utils import is_local_model, normalize_path, validate_local_model
 
 logger = logging.getLogger(__name__)
 
@@ -344,6 +344,7 @@ def create_app() -> FastAPI:
         csv_file: UploadFile = File(...),
         test_csv_file: UploadFile | None = File(None),
         model: str = Form(...),
+        template: str = Form(""),
         target: str = Form(""),
         output: str = Form(""),
         test_ratio: float = Form(0.2),
@@ -391,6 +392,17 @@ def create_app() -> FastAPI:
                          "or set openAI_endpoint / auth_key / agent_LLM in .env"},
             )
 
+        # Validate local model path (if applicable)
+        if is_local_model(model):
+            errors = validate_local_model(model)
+            if errors:
+                return JSONResponse(
+                    status_code=400,
+                    content={"error": "Local model directory is missing required files: "
+                             + "; ".join(errors)},
+                )
+            model = str(Path(model).resolve())
+
         # Save uploaded CSV
         run_id = uuid.uuid4().hex[:12]
         csv_stem = Path(csv_file.filename or "dataset").stem
@@ -426,7 +438,7 @@ def create_app() -> FastAPI:
             logging_steps=logging_steps, save_steps=save_steps,
             quantization_bit=quantization_bit, flash_attn=flash_attn,
             precision=precision, test_ratio=test_ratio,
-            finetune_retries=finetune_retries,
+            finetune_retries=finetune_retries, template=template,
         )
 
         initial_state = {

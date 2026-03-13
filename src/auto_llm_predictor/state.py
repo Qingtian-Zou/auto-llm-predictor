@@ -40,7 +40,7 @@ class PipelineState(TypedDict):
     """Column name of the prediction target (may be empty if auto-detected)."""
 
     base_model: str
-    """HuggingFace model ID for fine-tuning, e.g. 'Qwen/Qwen2.5-7B-Instruct'."""
+    """HuggingFace model ID or local path for fine-tuning, e.g. 'Qwen/Qwen2.5-7B-Instruct' or '/path/to/model'."""
 
     output_dir: str
     """Root directory for all generated artefacts."""

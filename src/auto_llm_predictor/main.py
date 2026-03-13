@@ -28,12 +28,12 @@ from langgraph.types import Command
 
 from auto_llm_predictor.checkpoint import load_state
 from auto_llm_predictor.graph import build_graph
-from auto_llm_predictor.utils import normalize_path
+from auto_llm_predictor.utils import is_local_model, normalize_path, validate_local_model
 
 
 def _build_training_config(args) -> dict:
     """Build the training_config dict from parsed CLI arguments."""
-    return {
+    config = {
         "lora_rank": args.lora_rank,
         "lora_alpha": args.lora_alpha,
         "use_dora": args.use_dora,
@@ -50,6 +50,9 @@ def _build_training_config(args) -> dict:
         "test_ratio": args.test_ratio,
         "finetune_max_retries": args.finetune_retries,
     }
+    if getattr(args, "template", ""):
+        config["template"] = args.template
+    return config
 
 
 def main():
@@ -82,7 +85,12 @@ Examples:
 
     # Required
     parser.add_argument("--csv", required=True, help="Path to the raw CSV file")
-    parser.add_argument("--model", required=True, help="HuggingFace model ID for fine-tuning")
+    parser.add_argument("--model", required=True,
+                        help="HuggingFace model ID or local model directory path for fine-tuning")
+
+    parser.add_argument("--template", default="",
+                        help="LlamaFactory chat template (e.g. llama3, qwen, mistral). "
+                             "Auto-detected from model name or config.json if not set.")
 
     # Optional
     parser.add_argument("--target", default="", help="Target column name (auto-detected if empty)")
@@ -175,6 +183,16 @@ Examples:
               file=sys.stderr)
         sys.exit(1)
 
+    # Validate local model path (if applicable)
+    if is_local_model(args.model):
+        errors = validate_local_model(args.model)
+        if errors:
+            print("Error: Local model directory is missing required files:", file=sys.stderr)
+            for e in errors:
+                print(f"  {e}", file=sys.stderr)
+            sys.exit(1)
+        args.model = str(Path(args.model).resolve())
+
     output_dir = args.output if args.output else str(Path("output") / csv_path.stem)
     output_dir = normalize_path(str(Path(output_dir).resolve()))
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -189,7 +207,8 @@ Examples:
     else:
         print(f"Test ratio:   {args.test_ratio}")
     print(f"Target:       {args.target or '(auto-detect)'}")
-    print(f"Base model:   {args.model}")
+    model_display = f"{args.model} (local)" if is_local_model(args.model) else args.model
+    print(f"Base model:   {model_display}")
     print(f"Output dir:   {output_dir}")
     cutoff_display = '(auto-detect)' if args.auto_cutoff else str(args.cutoff_len)
     print(f"Cutoff len:   {cutoff_display}")
