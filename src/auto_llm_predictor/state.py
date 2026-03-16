@@ -67,6 +67,12 @@ class PipelineState(TypedDict):
     task_type: str
     """'binary', 'multiclass', or 'regression'."""
 
+    exploration_steps: list[dict]
+    """Log of tool calls made by the exploration agent during data investigation."""
+
+    data_quality_report: str
+    """Comprehensive data quality report produced by the exploration agent."""
+
     # ── Code generation ────────────────────────────────────────────
     prep_plan: str
     """Natural-language description of the data preparation strategy."""

@@ -147,6 +147,15 @@ def _stream_graph(run: RunState, input_data: dict | Any) -> None:
                 # Node just finished
                 _emit(run, "node_complete", {"node": node_name, "message": f"Completed: {node_name}"})
 
+        # Intercept explore_data updates to warn about fallback mode.
+        if mode == "updates" and isinstance(chunk, dict) and "explore_data" in chunk:
+            explore_output = chunk["explore_data"]
+            if explore_output.get("exploration_steps") == []:
+                _emit(run, "log", {
+                    "message": "[explore_data] WARNING: Model does not support "
+                    "tool calling. Fell back to single-shot exploration."
+                })
+
         # Intercept evaluation results from updates so we can surface them
         # immediately, before the optional XAI node runs.
         if mode == "updates" and isinstance(chunk, dict) and "run_evaluation" in chunk:

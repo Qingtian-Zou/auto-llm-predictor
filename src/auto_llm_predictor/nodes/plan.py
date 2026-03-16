@@ -276,6 +276,7 @@ def plan_preparation(state: PipelineState, *, llm) -> dict:
         target_mapping=state["target_mapping"],
         n_columns=n_columns,
         pre_selected_features=pre_selected,
+        data_quality_notes=state.get("data_quality_report", ""),
     )
 
     # If the user provided feedback from a review cycle, append it

@@ -229,7 +229,7 @@ def debug_prep_failure(state: PipelineState, *, llm=None) -> dict:
         debug_agent = create_agent(
             model=llm,
             tools=tools,
-            prompt=DEBUG_SYSTEM,
+            system_prompt=DEBUG_SYSTEM,
         )
 
         result = debug_agent.invoke(
