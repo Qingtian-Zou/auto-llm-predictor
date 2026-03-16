@@ -32,6 +32,16 @@ def write_prep_code(state: PipelineState, *, llm) -> dict:
         previous_error = state["prep_result"]
         previous_code = state.get("prep_code", "")
 
+    # Build debug diagnosis context if available
+    debug_diagnosis = state.get("debug_diagnosis", "")
+    debug_tool_summary = ""
+    if debug_diagnosis:
+        tool_calls = state.get("debug_tool_calls", [])
+        debug_tool_summary = "\n".join(
+            f"- {tc.get('tool', '?')}({', '.join(f'{k}={v!r}' for k, v in tc.get('args', {}).items())})"
+            for tc in tool_calls
+        ) or ""
+
     user_prompt = format_codegen_prompt(
         csv_path=state["csv_path"],
         data_profile=state["data_profile"],
@@ -48,6 +58,8 @@ def write_prep_code(state: PipelineState, *, llm) -> dict:
         previous_error=previous_error,
         previous_code=previous_code,
         user_feedback=state.get("user_feedback", ""),
+        debug_diagnosis=debug_diagnosis,
+        debug_tool_summary=debug_tool_summary,
     )
 
     messages = [
@@ -80,6 +92,8 @@ def write_prep_code(state: PipelineState, *, llm) -> dict:
         "prep_code": code,
         "prep_code_path": str(script_path),
         "prep_attempts": attempts,
+        "debug_diagnosis": "",
+        "debug_tool_calls": [],
         "messages": [
             HumanMessage(content=f"[write_prep_code] Generated prepare_data.py (attempt {attempts}, "
                         f"{code.count(chr(10)) + 1} lines)"),

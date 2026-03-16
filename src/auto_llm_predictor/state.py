@@ -165,6 +165,13 @@ class PipelineState(TypedDict):
     balance_attempts: int
     """Number of balance code-generation attempts."""
 
+    # ── Debug agent ─────────────────────────────────────────────
+    debug_diagnosis: str
+    """Structured diagnosis from the debug agent when code generation fails."""
+
+    debug_tool_calls: list[dict]
+    """Log of tool calls made by the debug agent during failure investigation."""
+
     # ── Human-in-the-loop ────────────────────────────────────────
     user_feedback: str
     """User revision feedback from the data review breakpoint (empty if approved)."""

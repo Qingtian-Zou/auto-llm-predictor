@@ -92,6 +92,17 @@ The user reviewed a previous version and requested:
 Make sure the generated script strictly follows these instructions.
 """
 
+CODEGEN_DEBUG_CONTEXT = """\
+=== DEBUG AGENT DIAGNOSIS ===
+A debugging agent investigated the failure and found:
+{diagnosis}
+
+{tool_summary_section}\
+Use this diagnosis to fix the specific issues identified. The diagnosis \
+is more reliable than the raw error output because the agent inspected \
+the actual files and data.
+"""
+
 
 def format_codegen_prompt(
     csv_path: str,
@@ -109,12 +120,24 @@ def format_codegen_prompt(
     previous_error: str = "",
     previous_code: str = "",
     user_feedback: str = "",
+    debug_diagnosis: str = "",
+    debug_tool_summary: str = "",
 ) -> str:
     """Format the user prompt for the codegen node."""
     error_context = ""
     if previous_error:
         error_context = CODEGEN_RETRY_CONTEXT.format(
             previous_code=previous_code, error=previous_error,
+        )
+
+    if debug_diagnosis:
+        tool_summary_section = (
+            f"Tools used during investigation:\n{debug_tool_summary}\n\n"
+            if debug_tool_summary else ""
+        )
+        error_context += "\n" + CODEGEN_DEBUG_CONTEXT.format(
+            diagnosis=debug_diagnosis,
+            tool_summary_section=tool_summary_section,
         )
 
     user_feedback_context = ""

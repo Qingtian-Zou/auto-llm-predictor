@@ -29,6 +29,7 @@ from auto_llm_predictor.nodes.balance import (
     write_balance_code,
 )
 from auto_llm_predictor.nodes.codegen import write_prep_code
+from auto_llm_predictor.nodes.debug import debug_prep_failure, route_after_debug
 from auto_llm_predictor.nodes.config import generate_lmf_config
 from auto_llm_predictor.nodes.cutoff import determine_cutoff_len
 from auto_llm_predictor.nodes.evaluate import run_evaluation
@@ -136,6 +137,7 @@ def build_graph(
     # Coder LLM: code generation
     graph.add_node("write_prep_code", _bind_llm(write_prep_code, coder_llm))
     graph.add_node("execute_prep_code", execute_prep_code)
+    graph.add_node("debug_prep_failure", _bind_llm(debug_prep_failure, agent_llm))
     graph.add_node("verify_prepared_data", _bind_llm(verify_prepared_data, agent_llm))
     graph.add_node("review_prep_data", review_prep_data)
     graph.add_node("write_balance_code", _bind_llm(write_balance_code, coder_llm))
@@ -189,13 +191,21 @@ def build_graph(
     )
     graph.add_edge("write_prep_code", "execute_prep_code")
 
-    # Conditional: retry code generation on failure (up to 3 times)
+    # Conditional: on failure, debug then retry (up to 3 times)
     graph.add_conditional_edges(
         "execute_prep_code",
         check_prep_result,
         {
             "verify_prepared_data": "verify_prepared_data",
+            "debug_prep_failure": "debug_prep_failure",
+        },
+    )
+    graph.add_conditional_edges(
+        "debug_prep_failure",
+        route_after_debug,
+        {
             "write_prep_code": "write_prep_code",
+            "verify_prepared_data": "verify_prepared_data",
         },
     )
     graph.add_edge("verify_prepared_data", "review_prep_data")

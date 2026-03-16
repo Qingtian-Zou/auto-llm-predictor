@@ -46,11 +46,11 @@ class TestCheckPrepResult:
         state = {"prep_succeeded": True, "prep_attempts": 1}
         assert check_prep_result(state) == "verify_prepared_data"
 
-    def test_retry_when_under_max(self):
+    def test_retry_routes_to_debug(self):
         from auto_llm_predictor.nodes.execute import check_prep_result
 
         state = {"prep_succeeded": False, "prep_attempts": 2}
-        assert check_prep_result(state) == "write_prep_code"
+        assert check_prep_result(state) == "debug_prep_failure"
 
     def test_gives_up_at_max_attempts(self):
         from auto_llm_predictor.nodes.execute import check_prep_result
