@@ -9,14 +9,14 @@ Automatically build a fine-tuned LLM predictor from any CSV dataset. Powered by 
 
 ## Core Features
 
-- **End-to-End Automation**: From raw CSV profiling to evaluation and explainability.
-- **Post-Training Inference**: Run batch or interactive single-sample predictions on new data using the trained adapter — via CLI or Web UI.
-- **Explainable AI (XAI)**: Token-level explanations using SHAP, TransformerLens logit attribution, and attention (fallback) — all available methods run automatically.
-- **Smart Data Handling**: Automated feature selection for high-dim data and intelligent class balancing.
-- **Human-in-the-Loop**: Pause at critical checkpoints to override plans, code, or hyperparameters.
-- **Direct Editing**: Edit JSON preparation plans and LlamaFactory YAML configs inline (CLI or Web UI).
-- **Robustness**: Automated JSON repair and retry-on-failure logic for LLM-generated code (retry includes the previous failed script for better self-correction).
-- **Web UI**: Modern dashboard with live logging, progress tracking, artifact exporting, and an integrated Inference tab.
+- **Agentic Data Exploration**: A ReAct agent with sandboxed tools (`sample_rows`, `column_stats`, `value_counts`, `correlation_matrix`, `run_pandas_query`) investigates the CSV before identifying the target and task type.
+- **Self-Correcting Code Agent**: On script failure, a `debug_prep_failure` ReAct agent diagnoses the root cause before retrying — falls back to single-shot diagnosis for models without tool calling.
+- **Local Model Support**: `--model` accepts a local directory path in addition to HuggingFace IDs. Template is auto-detected from `config.json`; use `--template` to override.
+- **Post-Training Inference**: Batch or interactive single-sample predictions via CLI or Web UI, without re-running the pipeline.
+- **Explainable AI (XAI)**: Token-level explanations via SHAP, TransformerLens logit attribution, and attention fallback.
+- **Smart Data Handling**: Ensemble feature selection for high-dim data (≥50 cols); intelligent class balancing.
+- **Human-in-the-Loop**: Five interrupt checkpoints to override plans, code, or hyperparameters.
+- **Web UI**: Dashboard with live SSE logging, inline JSON/YAML editors, artifact export, and an Inference tab.
 
 ## Pipeline
 
@@ -30,7 +30,9 @@ graph TD
     RP -->|approve| D["write_prep_code"]
     RP -->|revise| C
     D --> E["execute_prep_code"]
-    E -->|failed ≤3×| D
+    E -->|failed| DBG["debug_prep_failure<br/>(ReAct agent)"]
+    DBG -->|retry| D
+    DBG -->|abort| V
     E -->|success| V["verify_prepared_data<br/>(LLM automated)"]
     V --> R1["review_prep_data<br/>⏸ interrupt"]
     R1 -->|approve| S["split_data"]
@@ -49,140 +51,92 @@ graph TD
     G --> H["run_prediction"]
     H --> I["run_evaluation"]
     I --> X{"--xai?"}
-    X -->|yes| XAI["run_xai<br/>(attention-based)"]
+    X -->|yes| XAI["run_xai"]
     X -->|no| DONE["END"]
     XAI --> DONE
 ```
 
 | Stage | What it does |
 |-------|-------------|
-| **explore_data** | Profiles the CSV and uses an LLM to identify the target column, task type, and label mapping. **Verifies header alignment** if `--test-csv` is provided |
-| **select_features** | Ensemble feature selection for high-dimensional data (≥50 columns): variance filtering → correlation ranking → mutual information → Random Forest importance → average-rank aggregation |
-| **plan_preparation** | LLM decides instruction template, input format, balancing strategy, and data cleaning steps |
-| **review_prep_plan** | ⏸ Human review of the preparation plan (features, instruction, target mapping, balance strategy) |
-| **write_prep_code** | LLM generates a self-contained Python script to convert CSV → `all_data.json` (+ `test_data.json` if test CSV provided) |
-| **execute_prep_code** | Runs the generated script; retries up to 3× on failure with error feedback |
-| **verify_prepared_data** | LLM examines random samples from the output JSONs to verify Alpaca format, label consistency, and cross-split terminology |
-| **review_prep_data** | ⏸ Human review of prepared data (features, dropped features, samples, distributions) + LLM critique |
-| **write_balance_code** | LLM generates a script to balance data (oversample/undersample) |
-| **execute_balance_code** | Runs the balancing script; retries up to 3× on failure |
-| **review_balanced_data** | ⏸ Human review of class distributions after balancing |
-| **split_data** | Deterministic train/test split (stratified), or direct assignment if `--test-csv` is provided |
-| **determine_cutoff** | ⏸ Analyzes training data token lengths; automatically sets optimal cutoff or asks for percentile choice if maximum is very high (>10k tokens) |
+| **explore_data** | ReAct agent with sandboxed tools iteratively investigates the CSV, then identifies target column, task type, and label mapping. Verifies header alignment when `--test-csv` is provided. |
+| **select_features** | Ensemble for high-dim data (≥50 cols): variance filter → correlation → mutual information → Random Forest → average-rank aggregation |
+| **plan_preparation** | LLM decides instruction template, input format, balancing strategy, and cleaning steps |
+| **review_prep_plan** | ⏸ Human reviews features, instruction, target mapping, balance strategy. Accepts `approve`, feedback text, or a raw JSON override. |
+| **write_prep_code** | LLM generates a Python script to convert CSV → `all_data.json` |
+| **execute_prep_code** | Runs the script; routes to debug agent on failure |
+| **debug_prep_failure** | ReAct agent diagnoses failures (reads files, runs snippets), produces a diagnosis for the next codegen attempt. Routes to retry or abort. |
+| **verify_prepared_data** | LLM checks random samples for Alpaca format, label consistency, and cross-split terminology |
+| **review_prep_data** | ⏸ Human reviews data stats and LLM critique. Can `approve`, request balancing, or give feedback to re-plan. |
+| **write/execute_balance_code** | LLM generates and runs a balancing script (retry on failure) |
+| **review_balanced_data** | ⏸ Human reviews class distributions before/after balancing |
+| **split_data** | Deterministic stratified split, or direct assignment if `--test-csv` is provided |
+| **determine_cutoff_len** | ⏸ Analyzes token lengths; pauses for percentile choice if max exceeds 10k tokens |
 | **generate_lmf_config** | Creates LlamaFactory YAML configs for training and prediction |
-| **review_lmf_config** | ⏸ Human review of hyperparameters before fine-tuning |
-| **run_finetuning** | Executes `llamafactory-cli train` (output streamed live); auto-resumes from the latest checkpoint on failure (up to `--finetune-retries` times) |
-| **run_prediction** | Runs prediction on train and test splits (output streamed live) |
-| **run_evaluation** | Computes accuracy, F1, confusion matrix via scikit-learn |
-| **run_xai** | *(optional, `--xai`)* Merges the LoRA adapter and runs token-level explanations in priority order: **SHAP** (Shapley values via text-generation pipeline), **TransformerLens** (logit attribution via residual stream decomposition), **Attention** (fallback, eager-mode last-layer weights). All succeeding methods are saved to a unified JSON report. |
+| **review_lmf_config** | ⏸ Human reviews hyperparameters. Accepts `approve`, key-value overrides, or a raw YAML override. |
+| **run_finetuning** | `llamafactory-cli train` with live output; auto-resumes from latest checkpoint on failure |
+| **run_prediction / run_evaluation** | Runs predictions; computes accuracy, F1, confusion matrix |
+| **run_xai** | *(optional)* SHAP → TransformerLens → attention fallback; saves unified JSON report |
 
 ## Installation
 
 Requires Python ≥ 3.11.
 
 ```bash
-# Core dependencies only
-pip install -e .
-
-# With LlamaFactory for fine-tuning (includes torch, transformers, etc.)
-pip install -e ".[train]"
-
-# With Web UI (FastAPI & Uvicorn)
-pip install -e ".[webui]"
-
-# With XAI support (attention-based explanations; also requires [train])
-pip install -e ".[xai]"
+pip install -e .                  # Core only
+pip install -e ".[train]"         # + LlamaFactory (fine-tuning)
+pip install -e ".[webui]"         # + FastAPI Web UI
+pip install -e ".[xai]"           # + XAI (also requires [train])
 ```
 
-> **Note:** If you already have [LlamaFactory](https://github.com/hiyouga/LLaMA-Factory) installed in your environment, the base install is sufficient.
+> If LlamaFactory is already installed in your environment, the base install is sufficient.
 
 ## Usage
 
 ```bash
-# Minimal — auto-detect target column
-auto-llm-predictor --csv data/my_dataset.csv --model mistralai/Mistral-7B-Instruct-v0.3
+# Minimal
+auto-llm-predictor --csv data.csv --model mistralai/Mistral-7B-Instruct-v0.3
 
-# Specify target and output directory
-auto-llm-predictor --csv data/patients.csv --target response \
+# With target column and output dir
+auto-llm-predictor --csv data.csv --target response \
     --model mistralai/Mistral-7B-Instruct-v0.3 --output output/exp1
 
-# Use a different agent LLM
-auto-llm-predictor --csv data/patients.csv --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --agent-model gpt-4o \
-    --agent-api-base https://api.openai.com/v1 \
-    --agent-api-key ...
+# Separate agent LLM
+auto-llm-predictor --csv data.csv --model mistralai/Mistral-7B-Instruct-v0.3 \
+    --agent-model gpt-4o --agent-api-base https://api.openai.com/v1 --agent-api-key ...
 
-# Resume a past experiment — re-split with a different ratio
-auto-llm-predictor --csv data/patients.csv --model mistralai/Mistral-7B-Instruct-v0.3 \
+# Resume from a checkpoint
+auto-llm-predictor --csv data.csv --model mistralai/Mistral-7B-Instruct-v0.3 \
     --output output/exp1 --start-from split --test-ratio 0.3
 
-# Resume — jump straight to config review with new hyperparameters
-auto-llm-predictor --csv data/patients.csv --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --output output/exp1 --start-from config --epochs 5 --lora-rank 128
+# Local model (template auto-detected from config.json)
+auto-llm-predictor --csv data.csv --model /models/Mistral-7B --template llama3
 ```
 
 ### Web UI
 
-Launch the browser-based interface for a more interactive experience:
-
 ```bash
-auto-llm-predictor-webui
-# Application starts on http://localhost:8000
+auto-llm-predictor-webui   # http://localhost:8000
 ```
-
-The Web UI provides:
-- **Live Progress**: Node-by-node execution tracking and logging via Server-Sent Events (SSE).
-- **Visual Feedback**: Real-time status indicators (e.g., breathing light effects) for the active pipeline stage.
-- **Interactive Reviews**: Pause at checkpoints with dedicated forms for approval or feedback.
-- **Inline Editors**: Direct editing of JSON plans and YAML configs in the browser.
-- **Artifact Export**: One-click download of generated scripts, datasets, and configurations.
-- **Inference Tab**: Run batch inference on new CSV files or interactive single-sample predictions directly from the browser.
-- **Resume on Reload**: Reconnects to an active pipeline run automatically if the page is refreshed.
 
 ### Inference
 
-After training completes, use the `auto-llm-predictor-infer` CLI to run predictions on new data without re-running the full pipeline.
-
 ```bash
-# Batch inference — process a new CSV through the trained adapter
+# Batch
 auto-llm-predictor-infer \
     --infer-output-dir output/my_dataset \
     --infer-run-dir output/my_dataset/run_20260307_120000 \
     --infer-csv data/new_data.csv
 
-# Interactive single-sample inference
-auto-llm-predictor-infer \
-    --infer-output-dir output/my_dataset \
-    --infer-run-dir output/my_dataset/run_20260307_120000 \
-    --infer-single
-
-# Single inference with XAI token-level explanations
+# Interactive single-sample (with optional XAI)
 auto-llm-predictor-infer \
     --infer-output-dir output/my_dataset \
     --infer-run-dir output/my_dataset/run_20260307_120000 \
     --infer-single --infer-xai
 ```
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--infer-output-dir` | *(required)* | Training output directory (contains `scripts/` and `.pipeline_state.json`) |
-| `--infer-run-dir` | *(required)* | Training run directory (contains the LoRA adapter under `sft/`) |
-| `--infer-csv` | *(none)* | Path to new CSV for batch inference |
-| `--infer-single` | off | Enter interactive single-sample inference mode |
-| `--infer-output` | `<run_dir>/inference_<timestamp>` | Output directory for batch predictions |
-| `--infer-xai` | off | Run XAI explanations on single prediction (requires `--infer-single`) |
-| `--infer-precision` | `bf16` | Precision (`bf16` or `fp16`) |
-| `--infer-quantization-bit` | *(none)* | Quantization bits (`4` or `8`) |
-| `--infer-flash-attn` | `auto` | Flash attention (`auto`, `fa2`, `disabled`) |
-| `-v` / `--verbose` | off | Enable debug logging |
-
-**Batch mode** reuses `scripts/prepare_data.py` from the training run to format the new CSV identically, then invokes `llamafactory-cli` with the saved adapter. Predictions are saved to `generated_predictions.jsonl` inside the inference output directory.
-
-**Single mode** prompts for each feature value interactively, builds an Alpaca-style prompt matching the training format, and generates a prediction directly (with optional XAI). The Inference tab in the Web UI exposes both modes without a terminal.
+Key inference flags: `--infer-csv`, `--infer-single`, `--infer-xai`, `--infer-precision` (`bf16`/`fp16`), `--infer-quantization-bit` (`4`/`8`), `--infer-flash-attn`.
 
 ### Environment Configuration
-
-Endpoints and model IDs can be set in a `.env` file (loaded automatically):
 
 ```env
 openAI_endpoint=192.168.x.y:1234
@@ -191,232 +145,96 @@ agent_LLM=gpt-oss-20b
 coder_LLM=qwen3-coder-30b-a3b-instruct
 ```
 
-CLI flags override `.env` values when both are specified.
+CLI flags override `.env` values.
 
 ### CLI Options
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--csv` | *(required)* | Path to the raw CSV file |
-| `--model` | *(required)* | HuggingFace model ID for fine-tuning |
+| `--model` | *(required)* | HuggingFace model ID or local directory path |
+| `--template` | *(auto-detect)* | LlamaFactory chat template (e.g. `llama3`, `qwen`, `mistral`) |
 | `--target` | *(auto-detect)* | Target column name |
 | `--output` | `output/<csv_stem>` | Output directory |
-| `--test-csv` | *(none)* | Optional separate test CSV (skips splitting) |
-| `--test-ratio` | `0.2` | Test split ratio (ignored when `--test-csv` is set) |
-| `--start-from` | *(none)* | Resume from step: `review_prep`, `split`, or `config` |
+| `--test-csv` | *(none)* | Separate test CSV (skips splitting) |
+| `--test-ratio` | `0.2` | Test split ratio |
+| `--start-from` | *(none)* | Resume from: `review_prep`, `split`, or `config` |
 | `--agent-api-base` | env: `openAI_endpoint` | OpenAI-compatible API base URL |
-| `--agent-api-key` | env: `auth_key` | API key for the LLM endpoint |
-| `--agent-model` | env: `agent_LLM` | Model ID for reasoning/planning |
-| `--coder-model` | env: `coder_LLM` | Model ID for code generation (falls back to agent-model) |
+| `--agent-api-key` | env: `auth_key` | API key |
+| `--agent-model` | env: `agent_LLM` | Model for reasoning/planning |
+| `--coder-model` | env: `coder_LLM` | Model for code generation |
 | `--agent-temperature` | `0.2` | Sampling temperature |
-| `-v` / `--verbose` | off | Enable debug logging |
 
-**Training & Robustness:**
+**Training:**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--auto-cutoff` | off | Automatically determine optimal cutoff length from training data |
-| `--cutoff-len` | `2048` | Max input token length (overridden if `--auto-cutoff` is used) |
+| `--auto-cutoff` | off | Auto-determine cutoff length from training data |
+| `--cutoff-len` | `2048` | Max input token length |
 | `--lora-rank` | `64` | LoRA rank |
 | `--lora-alpha` | `128` | LoRA alpha |
-| `--use-dora` | off | Enable DoRA adapter |
-| `--epochs` | `3.0` | Number of training epochs |
+| `--use-dora` | off | Enable DoRA |
+| `--epochs` | `3.0` | Training epochs |
 | `--learning-rate` | `2.0e-5` | Learning rate |
 | `--batch-size` | `1` | Per-device train batch size |
 | `--grad-accumulation` | `16` | Gradient accumulation steps |
-| `--logging-steps` | `10` | Logging interval in steps |
-| `--save-steps` | `500` | Checkpoint save interval |
-| `--quantization-bit` | *(none)* | Quantization bits (`4` or `8`) |
+| `--quantization-bit` | *(none)* | Quantization (`4` or `8`) |
 | `--flash-attn` | `fa2` | Flash attention (`auto`, `fa2`, `disabled`) |
-| `--precision` | `bf16` | Training precision (`bf16` or `fp16`) |
-| `--xai` | off | Run XAI explanations after evaluation — SHAP, TransformerLens, and attention fallback (requires `[train]` deps and GPU) |
-| `--finetune-retries` | `3` | Max auto-resume attempts when fine-tuning fails mid-training; resumes from the latest checkpoint if one exists, otherwise retries from scratch |
+| `--precision` | `bf16` | Training precision |
+| `--xai` | off | Run XAI after evaluation (requires `[train]` + GPU) |
+| `--finetune-retries` | `3` | Max auto-resume attempts on fine-tuning failure |
 
 ## Human-in-the-Loop Review
 
-The pipeline pauses at five checkpoints using LangGraph's `interrupt()` API:
+Five interrupt checkpoints — respond with `approve`, feedback text, or a direct JSON/YAML override:
 
-### Plan Review (`review_prep_plan`)
+| Checkpoint | Supported feedback patterns |
+|------------|---------------------------|
+| **review_prep_plan** | `drop features: ...`, `add features: ...`, `change instruction to: ...`, `change target mapping: ...`, `use oversample` |
+| **review_prep_data** | Same as above plus `keep only features: ...`, `test_ratio: 0.3`, `balance` / `oversample` / `undersample` |
+| **determine_cutoff_len** | `approve` / Enter, `p95` / `p90` / `p85` / `p80`, or a custom integer (e.g. `4096`) |
+| **review_balanced_data** | `approve`, `use undersample instead`, `balance_strategy: none` |
+| **review_lmf_config** | `lora_rank: 32`, `num_train_epochs: 5`, `learning_rate: 1.0e-5`, or any LlamaFactory key |
 
-After the LLM generates its data preparation plan, you see a summary of selected features, dropped features, the instruction template, input/output format, target mapping, balance strategy, and data cleaning steps. Respond with:
-
-- **`approve`** — Proceed to code generation
-- **Feedback** — loops back to re-plan. Supported patterns:
-
-```
-drop features: patient_id, smoker
-add features: weight, height
-change instruction to: Predict whether the patient will respond to treatment
-change target mapping: 0=No Response, 1=Response
-use oversample
-```
-
-**[NEW] Direct JSON Editing:** You can paste a complete JSON block as your response to manually override the entire plan. In the Web UI, an inline JSON editor is provided.
-
-### Data Review (`review_prep_data`)
-
-After data preparation and automated LLM verification, you see a summary of features, dropped features (on a single line for easy copy-pasting), data sizes, class distribution, a sample entry, and an **Automated Data Verification (LLM Critique)** section. Respond with:
-
-- **`approve`** — Proceed to train/test split (or config generation after balancing)
-- **`balance`** / **`oversample`** / **`undersample`** — Proceed to balance training data
-- **Feedback** — loops back to re-plan and regenerate. Supported patterns:
-
-```
-drop features: patient_id, smoker
-add features: weight, height
-keep only features: age, bmi, cholesterol
-use undersample
-test_ratio: 0.3
-change target mapping: 0: No, 1: Yes
-change instruction to: Predict whether the patient will respond to treatment
-```
-
-### Cutoff Review (`determine_cutoff_len`)
-
-When `--auto-cutoff` is enabled, the pipeline analyzes your prepared training data. If the recommended maximum cutoff exceeds 10,000 tokens, it pauses to let you pick a lower percentile to save GPU memory:
-
-- **`approve`** / **Enter** — Accept the recommended maximum (100th percentile)
-- **`p95`**, **`p90`**, **`p85`**, **`p80`** — Use a lower percentile cutoff
-- **Custom Integer** — e.g., `4096`, uses that value directly
-
-### Balance Review (`review_balanced_data`)
-
-After data balancing, you see the class distribution before and after. Respond with:
-
-- **`approve`** — Proceed to train/test split
-- **Feedback** — loops back to re-balance with a different strategy:
-
-```
-use undersample instead
-use oversample
-balance_strategy: none
-```
-
-### Config Review (`review_lmf_config`)
-
-Before fine-tuning, you see a highlighted table of key training parameters and all LlamaFactory YAML configs. Respond with:
-
-- **`approve`** — start fine-tuning
-- **Key-value overrides** — merged into config and YAMLs are regenerated for re-review:
-
-```
-lora_rank: 32, num_train_epochs: 5
-learning_rate: 1.0e-5
-per_device_train_batch_size: 4
-cutoff_len: 4096
-```
-
-**[NEW] Direct YAML Editing:** You can paste a complete LlamaFactory YAML block as your response to manually override the training configuration. In the Web UI, you can directly edit the provided YAML block.
-
-**Training-only parameters:** `lora_rank`, `lora_alpha`, `lora_dropout`, `lora_target`, `use_dora`, `num_train_epochs`, `learning_rate`, `lr_scheduler_type`, `warmup_ratio`, `per_device_train_batch_size`, `gradient_accumulation_steps`, `save_steps`, `save_strategy`, `save_total_limit`, `logging_steps`, `val_size`, `eval_steps`, `plot_loss`, `report_to`, `ddp_timeout`
-
-**Shared parameters (all YAMLs):** `bf16`, `fp16`, `flash_attn`, `quantization_bit`, `per_device_eval_batch_size`, `preprocessing_num_workers`, `template`
-
-## Robustness & Reliability
-
-- **Automated JSON Repair**: The pipeline includes a robust parsing layer that can automatically repair common LLM errors (e.g., unclosed brackets or trailing commas), significantly reducing pipeline crashes during planning and code generation.
-- **Retry Logic**: All code execution nodes (preparation, balancing) feature automated retries with error feedback loops. On retry, the LLM sees both the error message *and* the previous failed script, enabling more targeted self-correction.
-- **WANDB Disabled by Default**: `WANDB_DISABLED=true` is set automatically when invoking LlamaFactory, so no Weights & Biases API key is required.
-- **Fine-Tuning Auto-Resume**: If `llamafactory-cli train` fails mid-run, the pipeline automatically detects the latest `checkpoint-{step}/` directory, sets `resume_from_checkpoint: true` in the training YAML, and retries — up to `--finetune-retries` times (default 3). When no checkpoint exists, it retries from scratch to handle transient errors.
-- **Cross-Platform Paths**: Checkpoint state is normalized on save/load so runs started on Windows can be resumed on Linux and vice versa.
-- **Human-in-the-Loop**: Checkpoints at every critical stage ensure you can override decisions before expensive GPU resources are consumed.
-
-## Feature Selection
-
-For high-dimensional datasets (≥50 feature columns), the pipeline automatically runs an ensemble feature selection before LLM-based planning:
-
-1. **Variance filtering** — removes near-constant features
-2. **Correlation ranking** — Pearson |r| with target
-3. **Mutual information** — non-linear dependency score
-4. **Random Forest importance** — tree-based feature importance
-5. **Average-rank aggregation** — combines all methods
-
-Results are saved to `<output_dir>/feature_selection/feature_rankings.csv`.
+Direct JSON/YAML override: paste a complete JSON block (plan review) or YAML block (config review) to bypass the LLM and use it as-is.
 
 ## Output Structure
 
 ```
 output/<csv_stem>/
 ├── data/
-│   ├── all_data.json            # Full dataset (Alpaca format, pre-split)
-│   ├── balanced_data.json       # Balanced training data (if oversample/undersample used)
-│   ├── test_data.json           # (only if --test-csv provided)
-│   ├── train.json               # Training split (created by split_data)
-│   ├── test.json                # Test split (created by split_data)
-│   └── dataset_info.json        # LlamaFactory dataset registry
+│   ├── all_data.json / train.json / test.json
+│   ├── balanced_data.json       # (if balancing used)
+│   └── dataset_info.json
 ├── scripts/
-│   ├── prepare_data.py          # LLM-generated data prep script
-│   └── balance_data.py          # LLM-generated balancing script
-├── feature_selection/           # (high-dimensional datasets only)
-│   ├── selected_features.txt
-│   └── feature_rankings.csv
-├── .pipeline_state.json         # Saved state for --start-from
-├── run_20250220_143015/         # Timestamped per training run
-│   ├── configs/
-│   │   ├── train.yaml
-│   │   ├── predict_train.yaml
-│   │   └── predict_test.yaml
-│   ├── sft/                     # LoRA adapter + training logs
-│   ├── predict_train/           # Predictions on training set
-│   ├── predict_test/            # Predictions on test set
-│   ├── evaluation/
-│   │   └── results.json         # Accuracy, F1, confusion matrix
-│   └── xai/                     # (only if --xai)
-│       ├── xai_report.json      # Per-sample token-level explanations (all methods)
-│       └── xai_heatmap.png      # Top-token attribution visualization
-└── run_20250221_091200/         # Next run — past runs preserved
-    └── ...
+│   ├── prepare_data.py
+│   └── balance_data.py
+├── feature_selection/           # (high-dim datasets only)
+├── .pipeline_state.json         # state for --start-from
+└── run_<timestamp>/
+    ├── configs/                 # train.yaml, predict_*.yaml
+    ├── sft/                     # LoRA adapter + logs
+    ├── predict_train/ predict_test/
+    ├── evaluation/results.json
+    └── xai/                     # (if --xai)
 ```
 
 ## Project Structure
 
 ```
 src/auto_llm_predictor/
-├── main.py                     # CLI entry point with interrupt/resume loop
-├── webui.py                    # Web UI server (FastAPI + SSE + threads)
-├── inference.py                # Standalone inference CLI (batch & single modes)
-├── graph.py                    # LangGraph pipeline definition
-├── state.py                    # PipelineState TypedDict schema
-├── checkpoint.py               # Save/load state for --start-from
-├── utils.py                    # CSV profiling, script execution, YAML I/O
-├── static/                     # Web UI frontend (HTML/CSS/JS)
-├── prompts/
-│   ├── explore.py              # Data analysis prompts
-│   ├── plan.py                 # Preparation planning prompts
-│   ├── codegen.py              # Code generation prompts
-│   ├── verify.py               # Automated data verification prompts
-│   └── balance.py              # Balancing code generation prompts
+├── main.py / webui.py / inference.py / graph.py / state.py
+├── checkpoint.py / utils.py
+├── prompts/  explore.py  plan.py  codegen.py  debug.py  verify.py  balance.py
 └── nodes/
-    ├── explore.py              # Profile CSV → LLM identifies target & task
-    ├── feature_selection.py    # Ensemble feature selection (high-dim)
-    ├── plan.py                 # LLM creates data preparation plan
-    ├── codegen.py              # LLM generates prepare_data.py
-    ├── execute.py              # Runs script, validates output, retries
-    ├── verify.py               # LLM-based automated dataset verification
-    ├── balance.py              # LLM generates & runs balance_data.py
-    ├── review.py               # Human-in-the-loop review breakpoints
-    ├── split.py                # Deterministic train/test splitting
-    ├── config.py               # Generates LlamaFactory YAMLs (with run_dir reuse)
-    ├── finetune.py             # Runs llamafactory-cli train
-    ├── predict.py              # Runs prediction on train/test
-    ├── evaluate.py              # Robust classification metrics (handles raw strings)
-    ├── explain.py               # XAI: SHAP + TransformerLens + attention fallback
+    ├── explore.py          # ReAct agent: identifies target & task
+    ├── feature_selection.py
+    ├── plan.py / codegen.py / execute.py
+    ├── debug.py            # ReAct agent: diagnoses failures
+    ├── verify.py / balance.py / review.py / split.py
+    ├── config.py / finetune.py / predict.py / evaluate.py / explain.py
 ```
-
-## Dependencies
-
-- **langgraph** ≥ 0.2 — pipeline orchestration & interrupt support
-- **langchain-core / langchain-openai** ≥ 0.3 — LLM integration
-- **pandas** ≥ 2.0 — data profiling
-- **scikit-learn** ≥ 1.3 — feature selection, train/test splitting & evaluation metrics
-- **numpy** ≥ 1.24 — numerical operations
-- **pyyaml** ≥ 6.0 — YAML config generation
-- **python-dotenv** ≥ 1.0 — `.env` configuration loading
-- **typing-extensions** ≥ 4.0 — type annotations
-- **fastapi, uvicorn, python-multipart** — Web UI dependencies
-- **[LlamaFactory](https://github.com/hiyouga/LLaMA-Factory)** ≥ 0.9 — fine-tuning & prediction (optional: `pip install -e ".[train]"`)
-- **shap** ≥ 0.42, **transformer-lens** ≥ 2.0, **matplotlib** ≥ 3.5 — XAI explanations (optional: `pip install -e ".[xai]"`)
 
 ## License
 
-This project is licensed under the Apache License 2.0. See the [LICENSE](LICENSE) file for details.
+Apache License 2.0. See [LICENSE](LICENSE).
