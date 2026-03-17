@@ -36,6 +36,7 @@ import logging
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -365,6 +366,8 @@ def run_single_inference(
     xai: bool = False,
     precision: str = "bf16",
     quantization_bit: int | None = None,
+    log_callback: Callable[[str], None] | None = None,
+    prediction_callback: Callable[[dict], None] | None = None,
 ) -> dict:
     """Run inference on a single sample.
 
@@ -378,6 +381,10 @@ def run_single_inference(
         Feature name → value mapping for the single sample.
     xai : bool
         If True, run XAI explanations on the prediction.
+    prediction_callback : callable, optional
+        Called with ``{"prediction": str, "target_mapping": dict}`` as soon
+        as the prediction is ready (before XAI starts).  Useful for
+        streaming the prediction to the UI without waiting for XAI.
 
     Returns
     -------
@@ -401,23 +408,40 @@ def run_single_inference(
     # ── Build prompt from sample features ──────────────────────
     prompt = _build_single_prompt(state, sample_features)
 
-    print("=" * 60)
-    print("SINGLE INFERENCE")
-    print(f"Model:    {base_model}")
-    print(f"Adapter:  {adapter_path}")
-    print(f"Prompt:   {prompt[:200]}{'...' if len(prompt) > 200 else ''}")
-    print("=" * 60 + "\n", flush=True)
+    def _log(msg: str) -> None:
+        print(msg, flush=True)
+        if log_callback:
+            log_callback(msg)
+
+    _log("=" * 60)
+    _log("SINGLE INFERENCE")
+    _log(f"Model:    {base_model}")
+    _log(f"Adapter:  {adapter_path}")
+    _log(f"Prompt:   {prompt[:200]}{'...' if len(prompt) > 200 else ''}")
+    _log("=" * 60 + "\n")
 
     # ── Load and merge model ───────────────────────────────────
-    from auto_llm_predictor.nodes.explain import _merge_and_load, _cleanup_gpu
+    _log("Loading model and adapter...")
+    from auto_llm_predictor.nodes.explain import _merge_and_load, _release_model, _cleanup_gpu
 
     prec = precision or training_config.get("precision", "bf16")
-    tc = {**training_config, "precision": prec}
+    qbit = quantization_bit or training_config.get("quantization_bit")
+    tc = {**training_config, "precision": prec, "quantization_bit": qbit}
     model, tokenizer = _merge_and_load(base_model, adapter_path, tc)
 
-    # ── Generate prediction ────────────────────────────────────
-    template = state.get("training_config", {}).get("template") or _guess_template(base_model)
-    inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=4096)
+    # ── Apply chat template ───────────────────────────────────
+    # The model was fine-tuned with LlamaFactory's template-wrapped format,
+    # so we must wrap the prompt the same way for single inference.
+    messages = [{"role": "user", "content": prompt}]
+    if hasattr(tokenizer, "chat_template") and tokenizer.chat_template:
+        templated_prompt = tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+        )
+    else:
+        templated_prompt = prompt
+
+    cutoff_len = state.get("cutoff_len") or training_config.get("cutoff_len", 4096)
+    inputs = tokenizer(templated_prompt, return_tensors="pt", truncation=True, max_length=cutoff_len)
     inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
     with torch.no_grad():
@@ -432,16 +456,29 @@ def run_single_inference(
     generated_ids = outputs[0][inputs["input_ids"].shape[1]:]
     prediction = tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
 
-    print(f"\n✓ Prediction: {prediction}\n", flush=True)
+    # Free intermediate GPU tensors now that we have the string
+    del outputs, generated_ids, inputs
+
+    _log(f"\n✓ Prediction: {prediction}\n")
+
+    # ── Notify caller that prediction is ready ─────────────────
+    if prediction_callback:
+        prediction_callback({
+            "prediction": prediction,
+            "target_mapping": target_mapping,
+        })
 
     # ── Optional XAI ───────────────────────────────────────────
     xai_results = None
     if xai:
         xai_results = _run_single_xai(
             model, tokenizer, base_model, prompt, state, run_dir,
+            prediction=prediction,
+            log_callback=log_callback,
         )
 
     # ── Cleanup ────────────────────────────────────────────────
+    _release_model(model)
     del model, tokenizer
     _cleanup_gpu()
 
@@ -509,7 +546,11 @@ def _format_features_like_example(example_input: str, features: dict[str, str]) 
         return "\n".join(f"{k}: {v}" for k, v in features.items())
 
 
-def _run_single_xai(model, tokenizer, base_model, prompt, state, run_dir) -> list[dict]:
+def _run_single_xai(
+    model, tokenizer, base_model, prompt, state, run_dir,
+    prediction: str = "",
+    log_callback: Callable[[str], None] | None = None,
+) -> list[dict]:
     """Run XAI methods on a single sample prediction."""
     from auto_llm_predictor.nodes.explain import (
         _run_shap,
@@ -517,34 +558,79 @@ def _run_single_xai(model, tokenizer, base_model, prompt, state, run_dir) -> lis
         _run_attention,
     )
 
+    def _log(msg: str) -> None:
+        print(msg, flush=True)
+        if log_callback:
+            log_callback(msg)
+
     xai_dir = Path(run_dir) / "single_xai"
     xai_dir.mkdir(parents=True, exist_ok=True)
 
-    sample = {"instruction": prompt, "input": "", "output": ""}
+    sample = {"instruction": prompt, "input": "", "output": prediction}
 
-    print("=" * 60)
-    print("XAI — Explaining single prediction")
-    print("=" * 60 + "\n", flush=True)
+    _log("=" * 60)
+    _log("XAI — Explaining single prediction")
+    _log("=" * 60 + "\n")
 
     results = []
 
     # 1. SHAP
-    shap_result = _run_shap(model, tokenizer, [sample], xai_dir)
+    _log("Starting SHAP explanation...")
+    shap_result = _run_shap(model, tokenizer, [sample], xai_dir, log_callback=log_callback)
     if shap_result:
         results.append(shap_result)
 
     # 2. TransformerLens
-    tl_result = _run_transformer_lens(model, tokenizer, base_model, [sample], xai_dir)
+    _log("Starting TransformerLens explanation...")
+    tl_result = _run_transformer_lens(
+        model, tokenizer, base_model, [sample], xai_dir, log_callback=log_callback,
+    )
     if tl_result:
         results.append(tl_result)
 
     # 3. Attention fallback
     if not results:
-        attn_result = _run_attention(model, tokenizer, [sample])
+        _log("Starting Attention fallback explanation...")
+        attn_result = _run_attention(model, tokenizer, [sample], log_callback=log_callback)
         if attn_result:
             results.append(attn_result)
 
+    _log("XAI analysis complete.")
+
+    # Final GPU cleanup — XAI methods may leave residual tensors or caches
+    # that keep VRAM occupied even after the model is deleted by the caller.
+    from auto_llm_predictor.nodes.explain import _cleanup_gpu
+    _cleanup_gpu()
+
     return results
+
+
+def _parse_input_to_features(input_text: str) -> dict[str, str]:
+    """Reverse of _format_features_like_example: parse formatted input back to a dict.
+
+    Supports newline-separated ``key: value``, comma-separated ``key: value``,
+    and ``key=value`` formats.
+    """
+    features: dict[str, str] = {}
+    if not input_text:
+        return features
+
+    if "\n" in input_text and ": " in input_text:
+        for line in input_text.split("\n"):
+            if ": " in line:
+                k, v = line.split(": ", 1)
+                features[k.strip()] = v.strip()
+    elif ", " in input_text and ": " in input_text:
+        for pair in input_text.split(", "):
+            if ": " in pair:
+                k, v = pair.split(": ", 1)
+                features[k.strip()] = v.strip()
+    elif "=" in input_text:
+        for pair in input_text.split(", "):
+            if "=" in pair:
+                k, v = pair.split("=", 1)
+                features[k.strip()] = v.strip()
+    return features
 
 
 def get_feature_names(output_dir: str) -> list[str]:
@@ -633,6 +719,13 @@ Examples:
     )
 
     args = parser.parse_args()
+
+    # ── XAI hardware defaults: fp16 + 8-bit quantization ──────
+    if args.infer_xai:
+        if args.infer_precision == "bf16":
+            args.infer_precision = "fp16"
+        if args.infer_quantization_bit is None:
+            args.infer_quantization_bit = 8
 
     # ── Setup logging ──────────────────────────────────────────
     level = logging.DEBUG if args.verbose else logging.INFO

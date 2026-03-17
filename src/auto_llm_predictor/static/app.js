@@ -659,8 +659,290 @@
     const singleResultPanel = document.getElementById("single-result-panel");
     const singleResultContent = document.getElementById("single-result-content");
 
-    let loadedFeatures = [];
+    // Auto-fill DOM refs
+    const csvAutofillSection = document.getElementById("csv-autofill-section");
+    const singleCsvDrop = document.getElementById("single-csv-drop");
+    const singleCsvFile = document.getElementById("single-csv-file");
+    const singleCsvName = document.getElementById("single-csv-name");
+    const csvRowSelector = document.getElementById("csv-row-selector");
+    const csvRowIndex = document.getElementById("csv-row-index");
+    const csvRowCount = document.getElementById("csv-row-count");
+    const csvRowLabel = document.getElementById("csv-row-label");
+    const csvMissingNotice = document.getElementById("csv-missing-notice");
+    const csvFeaturesList = document.getElementById("csv-features-list");
+    const loadTrainingCsvBtn = document.getElementById("load-training-csv-btn");
+    const trainingCsvStatus = document.getElementById("training-csv-status");
+    const loadProcessedBtn = document.getElementById("load-processed-btn");
+    const processedDataset = document.getElementById("processed-dataset");
+    const processedStatus = document.getElementById("processed-status");
 
+    let loadedFeatures = [];
+    let parsedCsvRows = [];
+    let currentTrueLabel = null;
+
+    // ── Data source toggle ────────────────────────────────────
+    const dataSrcBtns = document.querySelectorAll(".data-src-btn");
+    const srcPanels = {
+        "upload": document.getElementById("src-upload-panel"),
+        "training-csv": document.getElementById("src-training-panel"),
+        "processed": document.getElementById("src-processed-panel"),
+    };
+
+    function setDataSource(source) {
+        for (const btn of dataSrcBtns) {
+            btn.classList.toggle("data-src-btn--active", btn.dataset.source === source);
+        }
+        for (const [key, panel] of Object.entries(srcPanels)) {
+            if (panel) panel.classList.toggle("src-panel--hidden", key !== source);
+        }
+    }
+
+    for (const btn of dataSrcBtns) {
+        btn.addEventListener("click", function () { setDataSource(btn.dataset.source); });
+    }
+
+    // ── Helpers: show rows in the shared row selector ─────────
+    function resetRowSelector() {
+        parsedCsvRows = [];
+        currentTrueLabel = null;
+        if (csvRowSelector) csvRowSelector.classList.add("csv-row-selector--hidden");
+        if (csvRowLabel) csvRowLabel.classList.add("csv-row-label--hidden");
+        if (csvMissingNotice) csvMissingNotice.classList.add("csv-missing-notice--hidden");
+        if (csvFeaturesList) csvFeaturesList.classList.add("csv-features-list--hidden");
+    }
+
+    function showRowSelector(data) {
+        parsedCsvRows = data.rows || [];
+        if (!parsedCsvRows.length) return;
+
+        csvRowIndex.max = parsedCsvRows.length - 1;
+        csvRowIndex.value = 0;
+        csvRowCount.textContent = "of " + parsedCsvRows.length + " rows" +
+            (data.truncated ? " (truncated)" : "");
+        csvRowSelector.classList.remove("csv-row-selector--hidden");
+
+        // Missing features notice
+        if (data.missing_features && data.missing_features.length > 0) {
+            csvMissingNotice.textContent = "Features not in source: " + data.missing_features.join(", ");
+            csvMissingNotice.classList.remove("csv-missing-notice--hidden");
+        } else {
+            csvMissingNotice.classList.add("csv-missing-notice--hidden");
+        }
+
+        // Selected features list
+        if (data.selected_features && data.selected_features.length > 0) {
+            csvFeaturesList.textContent = "Selected features: " + data.selected_features.join(", ");
+            csvFeaturesList.classList.remove("csv-features-list--hidden");
+        } else {
+            csvFeaturesList.classList.add("csv-features-list--hidden");
+        }
+
+        fillFeaturesFromRow(0);
+    }
+
+    function fillFeaturesFromRow(idx) {
+        if (idx < 0 || idx >= parsedCsvRows.length) return;
+        var rowData = parsedCsvRows[idx];
+
+        var inputs = featureInputsDiv.querySelectorAll(".feature-value");
+        for (var i = 0; i < inputs.length; i++) {
+            var feature = inputs[i].dataset.feature;
+            if (feature in rowData) {
+                inputs[i].value = rowData[feature];
+            }
+        }
+
+        // Track true label for display next to prediction
+        currentTrueLabel = ("__label__" in rowData) ? rowData["__label__"] : null;
+
+        // Show label for rows with known output
+        if ("__label__" in rowData && csvRowLabel) {
+            csvRowLabel.textContent = "True label: " + rowData["__label__"];
+            csvRowLabel.classList.remove("csv-row-label--hidden");
+        } else if (csvRowLabel) {
+            csvRowLabel.classList.add("csv-row-label--hidden");
+        }
+    }
+
+    if (csvRowIndex) {
+        csvRowIndex.addEventListener("input", function () {
+            var idx = parseInt(csvRowIndex.value, 10);
+            if (!isNaN(idx) && idx >= 0 && idx < parsedCsvRows.length) {
+                fillFeaturesFromRow(idx);
+            }
+        });
+    }
+
+    // ── Upload CSV file drop ──────────────────────────────────
+    if (singleCsvDrop && singleCsvFile) {
+        singleCsvDrop.addEventListener("click", function (e) {
+            if (e.target === singleCsvFile) return;
+            singleCsvFile.click();
+        });
+        singleCsvDrop.addEventListener("dragover", function (e) {
+            e.preventDefault();
+            singleCsvDrop.classList.add("file-drop--drag");
+        });
+        singleCsvDrop.addEventListener("dragleave", function () {
+            singleCsvDrop.classList.remove("file-drop--drag");
+        });
+        singleCsvDrop.addEventListener("drop", function (e) {
+            e.preventDefault();
+            singleCsvDrop.classList.remove("file-drop--drag");
+            if (e.dataTransfer.files.length) {
+                singleCsvFile.files = e.dataTransfer.files;
+                handleSingleCsvUpload();
+            }
+        });
+        singleCsvFile.addEventListener("change", function () {
+            if (singleCsvFile.files.length) handleSingleCsvUpload();
+        });
+    }
+
+    async function handleSingleCsvUpload() {
+        var file = singleCsvFile.files[0];
+        if (!file) return;
+
+        var outputDir = document.getElementById("infer-output-dir").value.trim();
+        if (!outputDir) {
+            alert("Please enter the Training Output Directory first.");
+            return;
+        }
+
+        singleCsvName.textContent = file.name + " (parsing…)";
+        singleCsvName.classList.add("file-drop__name--show");
+        resetRowSelector();
+
+        var fd = new FormData();
+        fd.append("csv_file", file);
+        fd.append("output_dir", outputDir);
+
+        try {
+            var res = await fetch("/api/infer/parse-csv", { method: "POST", body: fd });
+            var data = await res.json();
+
+            if (!res.ok) {
+                alert("CSV parse error: " + (data.error || "Unknown"));
+                singleCsvName.textContent = file.name + " (error)";
+                return;
+            }
+
+            singleCsvName.textContent = file.name;
+            if (!data.rows || !data.rows.length) {
+                singleCsvName.textContent = file.name + " (no matching rows)";
+                return;
+            }
+
+            showRowSelector(data);
+        } catch (err) {
+            alert("Network error: " + err.message);
+            singleCsvName.textContent = file.name + " (error)";
+        }
+    }
+
+    // ── Training CSV load ─────────────────────────────────────
+    if (loadTrainingCsvBtn) {
+        loadTrainingCsvBtn.addEventListener("click", async function () {
+            var outputDir = document.getElementById("infer-output-dir").value.trim();
+            if (!outputDir) { alert("Please enter the Training Output Directory first."); return; }
+
+            loadTrainingCsvBtn.disabled = true;
+            trainingCsvStatus.textContent = "Loading…";
+            resetRowSelector();
+
+            try {
+                var res = await fetch("/api/infer/training-rows?output_dir=" + encodeURIComponent(outputDir) + "&source=csv");
+                var data = await res.json();
+
+                if (!res.ok) {
+                    alert("Error: " + (data.error || "Unknown"));
+                    trainingCsvStatus.textContent = "Error";
+                    return;
+                }
+
+                trainingCsvStatus.textContent = data.total_rows + " rows loaded";
+                if (data.rows && data.rows.length) {
+                    showRowSelector(data);
+                } else {
+                    trainingCsvStatus.textContent = "No matching rows";
+                }
+            } catch (err) {
+                alert("Network error: " + err.message);
+                trainingCsvStatus.textContent = "Error";
+            } finally {
+                loadTrainingCsvBtn.disabled = false;
+            }
+        });
+    }
+
+    // ── Processed data load ───────────────────────────────────
+    var processedDatasetsLoaded = false;
+
+    async function loadProcessedData(dataset) {
+        var outputDir = document.getElementById("infer-output-dir").value.trim();
+        if (!outputDir) { alert("Please enter the Training Output Directory first."); return; }
+
+        if (loadProcessedBtn) loadProcessedBtn.disabled = true;
+        if (processedStatus) processedStatus.textContent = "Loading…";
+        resetRowSelector();
+
+        var url = "/api/infer/training-rows?output_dir=" + encodeURIComponent(outputDir) + "&source=jsonl";
+        if (dataset) url += "&dataset=" + encodeURIComponent(dataset);
+
+        try {
+            var res = await fetch(url);
+            var data = await res.json();
+
+            if (!res.ok) {
+                alert("Error: " + (data.error || "Unknown"));
+                if (processedStatus) processedStatus.textContent = "Error";
+                return;
+            }
+
+            // Populate dataset dropdown if available
+            if (data.available_datasets && processedDataset) {
+                processedDataset.innerHTML = "";
+                for (var i = 0; i < data.available_datasets.length; i++) {
+                    var ds = data.available_datasets[i];
+                    var opt = document.createElement("option");
+                    opt.value = ds.name;
+                    opt.textContent = ds.name + " (" + ds.count + " rows)";
+                    if (ds.name === data.dataset) opt.selected = true;
+                    processedDataset.appendChild(opt);
+                }
+                processedDatasetsLoaded = true;
+            }
+
+            if (processedStatus) processedStatus.textContent = data.total_rows + " rows loaded";
+            if (data.rows && data.rows.length) {
+                showRowSelector(data);
+            } else {
+                if (processedStatus) processedStatus.textContent = "No rows";
+            }
+        } catch (err) {
+            alert("Network error: " + err.message);
+            if (processedStatus) processedStatus.textContent = "Error";
+        } finally {
+            if (loadProcessedBtn) loadProcessedBtn.disabled = false;
+        }
+    }
+
+    if (loadProcessedBtn) {
+        loadProcessedBtn.addEventListener("click", function () {
+            var ds = processedDataset ? processedDataset.value : "";
+            loadProcessedData(ds);
+        });
+    }
+
+    if (processedDataset) {
+        processedDataset.addEventListener("change", function () {
+            if (processedDatasetsLoaded && processedDataset.value) {
+                loadProcessedData(processedDataset.value);
+            }
+        });
+    }
+
+    // ── Load features ─────────────────────────────────────────
     if (loadFeaturesBtn) {
         loadFeaturesBtn.addEventListener("click", async function () {
             const outputDir = document.getElementById("infer-output-dir").value.trim();
@@ -697,6 +979,17 @@
                 }
                 featureInputsDiv.innerHTML = html;
                 inferSingleBtn.disabled = false;
+
+                // Show auto-fill section and reset previous state
+                if (csvAutofillSection) {
+                    csvAutofillSection.classList.remove("csv-autofill-section--hidden");
+                }
+                resetRowSelector();
+                processedDatasetsLoaded = false;
+                if (processedDataset) processedDataset.innerHTML = '<option value="">-- select dataset --</option>';
+                if (singleCsvName) { singleCsvName.textContent = ""; singleCsvName.classList.remove("file-drop__name--show"); }
+                if (trainingCsvStatus) trainingCsvStatus.textContent = "";
+                if (processedStatus) processedStatus.textContent = "";
             } catch (err) {
                 alert("Network error: " + err.message);
             } finally {
@@ -704,6 +997,73 @@
                 loadFeaturesBtn.textContent = "↻ Load Features";
             }
         });
+    }
+
+    // ── Single inference — render result helpers ───────────────
+    function renderPredictionOnly(data) {
+        let html = '<div class="single-prediction">';
+        html += '<p class="prediction-label">Prediction</p>';
+        html += '<p class="prediction-value">' + escapeHtml(data.prediction || "—") + '</p>';
+
+        if (data.true_label != null && data.true_label !== "") {
+            var match = String(data.prediction).trim() === String(data.true_label).trim();
+            html += '<p class="prediction-true-label">';
+            html += 'True label: <strong>' + escapeHtml(String(data.true_label)) + '</strong> ';
+            html += match
+                ? '<span class="label-match label-match--correct">Match</span>'
+                : '<span class="label-match label-match--mismatch">Mismatch</span>';
+            html += '</p>';
+        }
+
+        if (data.target_mapping && Object.keys(data.target_mapping).length) {
+            html += '<p class="prediction-mapping"><small>Target mapping: ' +
+                JSON.stringify(data.target_mapping) + '</small></p>';
+        }
+
+        html += '</div>';
+        return html;
+    }
+
+    function renderXaiResults(xaiResults) {
+        if (!xaiResults || !xaiResults.length) return "";
+        let html = "";
+        for (const xr of xaiResults) {
+            const method = (xr.method || "unknown").toUpperCase();
+            html += '<div class="xai-result">';
+            html += '<h4 class="xai-method">XAI — ' + method + '</h4>';
+
+            // Prefer embedded SHAP HTML visualisation when available
+            if (xr.html) {
+                // Inject a small resize script so the iframe fits its content
+                const resizeScript = '<script>new ResizeObserver(()=>{' +
+                    'frameElement.style.height=document.documentElement.scrollHeight+"px"' +
+                    '}).observe(document.documentElement)<\/script>';
+                const framedHtml = xr.html + resizeScript;
+                html += '<iframe class="xai-shap-frame" srcdoc="' +
+                    framedHtml.replace(/&/g, '&amp;').replace(/"/g, '&quot;') +
+                    '" sandbox="allow-scripts allow-same-origin" frameborder="0"></iframe>';
+            } else {
+                const explanations = xr.sample_explanations || [];
+                if (explanations.length && explanations[0].token_scores) {
+                    html += '<table class="xai-tokens"><thead><tr><th>Token</th><th>Score</th></tr></thead><tbody>';
+                    const topScores = explanations[0].token_scores.slice(0, 15);
+                    const maxScore = Math.max(...topScores.map(ts => Math.abs(ts.score)), 1e-9);
+                    for (const ts of topScores) {
+                        const barWidth = Math.round(Math.abs(ts.score) / maxScore * 100);
+                        html += '<tr><td class="xai-token">' + escapeHtml(ts.token) + '</td>';
+                        html += '<td class="xai-score"><div class="xai-bar" style="width:' + barWidth + '%"></div>';
+                        html += '<span>' + ts.score.toFixed(6) + '</span></td></tr>';
+                    }
+                    html += '</tbody></table>';
+                }
+            }
+            html += '</div>';
+        }
+        return html;
+    }
+
+    function renderSingleResult(data) {
+        return renderPredictionOnly(data) + renderXaiResults(data.xai_results);
     }
 
     // ── Single inference — predict ───────────────────────────
@@ -731,6 +1091,9 @@
             singleResultPanel.classList.add("results-panel--hidden");
             appendInferLog("Running single inference…", "status");
 
+            // Capture true label at prediction time (may be null)
+            const trueLabel = currentTrueLabel;
+
             const fd = new FormData();
             fd.append("output_dir", outputDir);
             fd.append("run_dir", runDir);
@@ -746,50 +1109,72 @@
 
                 if (!res.ok) {
                     appendInferLog("Error: " + (data.error || "Unknown"), "error");
+                    inferSingleBtn.disabled = false;
+                    inferSingleBtn.innerHTML = '🔍 Predict';
                     return;
                 }
 
-                appendInferLog("✓ Prediction: " + data.prediction, "status");
+                // XAI mode: background thread with SSE streaming
+                if (data.run_id) {
+                    const runId = data.run_id;
+                    appendInferLog("Single inference with XAI started (run " + runId + ")", "status");
 
-                // Show result
-                let html = '<div class="single-prediction">';
-                html += '<p class="prediction-label">Prediction</p>';
-                html += '<p class="prediction-value">' + escapeHtml(data.prediction || "—") + '</p>';
-
-                if (data.target_mapping && Object.keys(data.target_mapping).length) {
-                    html += '<p class="prediction-mapping"><small>Target mapping: ' +
-                        JSON.stringify(data.target_mapping) + '</small></p>';
-                }
-
-                // XAI results
-                if (data.xai_results && data.xai_results.length) {
-                    for (const xr of data.xai_results) {
-                        const method = (xr.method || "unknown").toUpperCase();
-                        html += '<div class="xai-result">';
-                        html += '<h4 class="xai-method">XAI — ' + method + '</h4>';
-                        const explanations = xr.sample_explanations || [];
-                        if (explanations.length && explanations[0].token_scores) {
-                            html += '<table class="xai-tokens"><thead><tr><th>Token</th><th>Score</th></tr></thead><tbody>';
-                            for (const ts of explanations[0].token_scores.slice(0, 15)) {
-                                const barWidth = Math.min(100, Math.round(ts.score * 1000));
-                                html += '<tr><td class="xai-token">' + escapeHtml(ts.token) + '</td>';
-                                html += '<td class="xai-score"><div class="xai-bar" style="width:' + barWidth + '%"></div>';
-                                html += '<span>' + ts.score.toFixed(6) + '</span></td></tr>';
+                    const evtSource = new EventSource("/api/events/" + runId);
+                    evtSource.onmessage = function (ev) {
+                        const evt = JSON.parse(ev.data);
+                        if (evt.event === "log") {
+                            appendInferLog(evt.message || "");
+                        } else if (evt.event === "status") {
+                            appendInferLog(evt.message || "", "status");
+                        } else if (evt.event === "single_prediction") {
+                            // Prediction is ready — show it immediately
+                            appendInferLog("✓ Prediction: " + (evt.prediction || ""), "status");
+                            evt.true_label = trueLabel;
+                            singleResultContent.innerHTML = renderPredictionOnly(evt);
+                            singleResultPanel.classList.remove("results-panel--hidden");
+                        } else if (evt.event === "single_xai") {
+                            // XAI results arrived — append them below prediction
+                            appendInferLog("✓ XAI analysis complete", "status");
+                            singleResultContent.innerHTML += renderXaiResults(evt.xai_results);
+                        } else if (evt.event === "single_complete") {
+                            // All done — if prediction wasn't shown yet (e.g. replayed events), render everything
+                            if (singleResultPanel.classList.contains("results-panel--hidden")) {
+                                appendInferLog("✓ Prediction: " + (evt.prediction || ""), "status");
+                                evt.true_label = trueLabel;
+                                singleResultContent.innerHTML = renderSingleResult(evt);
+                                singleResultPanel.classList.remove("results-panel--hidden");
                             }
-                            html += '</tbody></table>';
+                            inferSingleBtn.disabled = false;
+                            inferSingleBtn.innerHTML = '🔍 Predict';
+                            evtSource.close();
+                        } else if (evt.event === "error") {
+                            appendInferLog("Error: " + (evt.message || "Unknown"), "error");
+                            inferSingleBtn.disabled = false;
+                            inferSingleBtn.innerHTML = '🔍 Predict';
+                            evtSource.close();
                         }
-                        html += '</div>';
-                    }
+                    };
+                    evtSource.onerror = function () {
+                        appendInferLog("SSE connection lost", "error");
+                        inferSingleBtn.disabled = false;
+                        inferSingleBtn.innerHTML = '🔍 Predict';
+                        evtSource.close();
+                    };
+                    return;  // Don't reset button — SSE handlers will do it
                 }
 
-                html += '</div>';
-                singleResultContent.innerHTML = html;
+                // Non-XAI mode: synchronous result
+                appendInferLog("✓ Prediction: " + data.prediction, "status");
+                data.true_label = trueLabel;
+                singleResultContent.innerHTML = renderSingleResult(data);
                 singleResultPanel.classList.remove("results-panel--hidden");
             } catch (err) {
                 appendInferLog("Network error: " + err.message, "error");
             } finally {
-                inferSingleBtn.disabled = false;
-                inferSingleBtn.innerHTML = '🔍 Predict';
+                if (!xaiEnabled) {
+                    inferSingleBtn.disabled = false;
+                    inferSingleBtn.innerHTML = '🔍 Predict';
+                }
             }
         });
     }

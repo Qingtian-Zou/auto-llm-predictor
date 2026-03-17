@@ -141,3 +141,53 @@ class TestGetFeatureNames:
         save_state({"base_model": "test"}, str(tmp_path))
         features = get_feature_names(str(tmp_path))
         assert features == []
+
+
+# ---------------------------------------------------------------------------
+# _run_single_xai — prediction passed as SHAP target
+# ---------------------------------------------------------------------------
+
+class TestRunSingleXaiPrediction:
+    """Verify that the predicted label is forwarded as the sample output."""
+
+    def test_prediction_passed_as_output(self, tmp_path, monkeypatch):
+        captured = {}
+
+        def fake_shap(model, tokenizer, samples, xai_dir, log_callback=None):
+            captured["shap_samples"] = samples
+            return None
+
+        def fake_tl(model, tokenizer, base_model, samples, xai_dir, log_callback=None):
+            return None
+
+        def fake_attn(model, tokenizer, samples, log_callback=None):
+            captured["attn_samples"] = samples
+            return {"method": "attention", "sample_explanations": []}
+
+        monkeypatch.setattr(
+            "auto_llm_predictor.nodes.explain._run_shap", fake_shap,
+        )
+        monkeypatch.setattr(
+            "auto_llm_predictor.nodes.explain._run_transformer_lens", fake_tl,
+        )
+        monkeypatch.setattr(
+            "auto_llm_predictor.nodes.explain._run_attention", fake_attn,
+        )
+        monkeypatch.setattr(
+            "auto_llm_predictor.nodes.explain._cleanup_gpu", lambda: None,
+        )
+
+        from auto_llm_predictor.inference import _run_single_xai
+
+        _run_single_xai(
+            model=None,
+            tokenizer=None,
+            base_model="test",
+            prompt="Predict class",
+            state={},
+            run_dir=str(tmp_path),
+            prediction="class_A",
+        )
+
+        assert captured["shap_samples"][0]["output"] == "class_A"
+        assert captured["attn_samples"][0]["output"] == "class_A"

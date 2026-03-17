@@ -53,6 +53,10 @@ def _merge_and_load(base_model: str, adapter_path: str, training_config: dict):
 
     Merging is required for both TransformerLens and SHAP (they need a
     plain ``AutoModelForCausalLM`` without PEFT wrappers).
+
+    When ``quantization_bit`` is set in *training_config*, the model is
+    loaded with 8-bit (or 4-bit) quantization via ``bitsandbytes`` to
+    reduce GPU memory usage — especially useful for XAI workloads.
     """
     import torch
     from peft import PeftModel
@@ -60,14 +64,24 @@ def _merge_and_load(base_model: str, adapter_path: str, training_config: dict):
 
     precision = training_config.get("precision", "bf16")
     dtype = torch.bfloat16 if precision == "bf16" else torch.float16
+    quantization_bit = training_config.get("quantization_bit")
+
+    load_kwargs: dict = {
+        "trust_remote_code": True,
+        "torch_dtype": dtype,
+        "device_map": "auto",
+    }
+
+    if quantization_bit in (4, 8):
+        from transformers import BitsAndBytesConfig
+        load_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_8bit=(quantization_bit == 8),
+            load_in_4bit=(quantization_bit == 4),
+        )
+        logger.info("Using %d-bit quantization with %s precision", quantization_bit, precision)
 
     logger.info("Loading base model: %s", base_model)
-    model = AutoModelForCausalLM.from_pretrained(
-        base_model,
-        trust_remote_code=True,
-        torch_dtype=dtype,
-        device_map="auto",
-    )
+    model = AutoModelForCausalLM.from_pretrained(base_model, **load_kwargs)
 
     logger.info("Loading and merging LoRA adapter: %s", adapter_path)
     model = PeftModel.from_pretrained(model, adapter_path)
@@ -81,8 +95,32 @@ def _merge_and_load(base_model: str, adapter_path: str, training_config: dict):
     return model, tokenizer
 
 
+def _release_model(model) -> None:
+    """Aggressively free a model's VRAM.
+
+    Quantized models (``bitsandbytes`` Int8Params) and models loaded with
+    ``device_map="auto"`` (``accelerate`` hooks) often survive a simple
+    ``del model`` due to circular references.  This helper replaces every
+    parameter and buffer tensor with a tiny CPU tensor, which immediately
+    releases the underlying CUDA storage regardless of remaining refs.
+    """
+    try:
+        import torch
+        empty = torch.empty(0)
+        for p in model.parameters():
+            p.data = empty
+        for b in model.buffers():
+            b.data = empty
+    except Exception:          # noqa: BLE001
+        pass                   # best-effort; the del + gc below will catch the rest
+
+
 def _cleanup_gpu():
     """Free GPU memory after model use."""
+    # Two gc passes: the first breaks simple cycles, the second catches
+    # weak-ref / weak-value-dict chains that only become collectable after
+    # the first pass frees their referents.
+    gc.collect()
     gc.collect()
     try:
         import torch
@@ -94,13 +132,23 @@ def _cleanup_gpu():
 
 # ── Prompt helpers ─────────────────────────────────────────────────
 
-def _build_prompt(entry: dict) -> str:
-    """Reconstruct the Alpaca-style prompt from a data entry."""
+def _build_prompt(entry: dict, tokenizer=None) -> str:
+    """Reconstruct the Alpaca-style prompt from a data entry.
+
+    When *tokenizer* is provided and has a ``chat_template``, the raw
+    prompt is wrapped in the model's chat format so that XAI methods
+    analyse the same input the model actually sees.
+    """
     instruction = entry.get("instruction", "")
     input_text = entry.get("input", "")
-    if input_text:
-        return f"{instruction}\n\n{input_text}"
-    return instruction
+    raw = f"{instruction}\n\n{input_text}" if input_text else instruction
+
+    if tokenizer and hasattr(tokenizer, "chat_template") and tokenizer.chat_template:
+        messages = [{"role": "user", "content": raw}]
+        return tokenizer.apply_chat_template(
+            messages, tokenize=False, add_generation_prompt=True,
+        )
+    return raw
 
 
 # ── Log helper ─────────────────────────────────────────────────────
@@ -129,32 +177,65 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path, log_callback
 
     try:
         import torch
+        import numpy as np
 
-        # Build a text-generation pipeline that SHAP can wrap.
-        # Do NOT pass device= when the model was loaded with device_map="auto"
-        # (accelerate manages placement and raises if you try to override it).
-        pipe = transformers.pipeline(
-            "text-generation",
-            model=model,
-            tokenizer=tokenizer,
-            max_new_tokens=32,
-            batch_size=1,
-        )
-
-        # Create the SHAP explainer wrapping the pipeline
+        # Use SHAP's TeacherForcing model for text-generation.
+        # TeacherForcing computes log-odds of generating the target tokens
+        # given (possibly masked) input — returning a proper numeric numpy
+        # array that SHAP's numba-compiled internals can handle.
         masker = shap.maskers.Text(tokenizer)
-        explainer = shap.Explainer(pipe, masker)
 
-        prompts = [_build_prompt(s) for s in samples]
+        prompts = [_build_prompt(s, tokenizer) for s in samples]
         true_labels = [s.get("output", "") for s in samples]
 
+        # Estimate token count for progress tracking
+        n_tokens = len(tokenizer.encode(prompts[0])) if prompts else 0
+
+        shap_model = shap.models.TeacherForcing(
+            model, tokenizer,
+        )
+
+        # Wrap the shap model call to report progress.
+        _orig_call = shap_model.__call__
+
+        _shap_calls = {"n": 0, "last_pct": -1}
+        _est_total = 2 * n_tokens + 1
+
+        def _tracked_call(*args, **kwargs):
+            _shap_calls["n"] += 1
+            pct = min(100, int(_shap_calls["n"] / _est_total * 100))
+            if log_callback and pct >= _shap_calls["last_pct"] + 5:
+                _shap_calls["last_pct"] = pct
+                log_callback(
+                    f"    SHAP evaluating masks: {_shap_calls['n']}/{_est_total} "
+                    f"(~{pct}%)"
+                )
+            return _orig_call(*args, **kwargs)
+        shap_model.__call__ = _tracked_call
+
+        explainer = shap.Explainer(shap_model, masker)
+
         _log("  Running SHAP explanations...", log_callback)
-        shap_values = explainer(prompts)
+        if n_tokens:
+            _log(f"    Prompt has ~{n_tokens} tokens → ~{2 * n_tokens + 1} mask evaluations", log_callback)
+
+        # TeacherForcing expects both input prompts and target outputs.
+        # The explainer passes (masked_X, Y) to the model at each step.
+        shap_prompts = np.array(prompts)
+        shap_targets = np.array(true_labels)
+        shap_result = explainer(shap_prompts, shap_targets, silent=True)
+
+        # TeacherForcing with two args returns [input_explanation,
+        # target_explanation].  We want the input side (index 0).
+        if isinstance(shap_result, list):
+            shap_values = shap_result[0]
+        else:
+            shap_values = shap_result
 
         # Extract per-sample token-level SHAP values
         sample_explanations = []
         for i in range(len(prompts)):
-            sv = shap_values[i]
+            sv = shap_values[i] if len(prompts) > 1 else shap_values
             # sv.values may be 1-D (single output) or 2-D (multi-output)
             values = sv.values
             tokens = sv.data
@@ -168,14 +249,15 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path, log_callback
                 })
                 continue
 
-            import numpy as np
-            # If multi-output, take the max absolute SHAP across outputs
-            if values.ndim > 1:
+            # Collapse to 1-D: one importance score per input token.
+            # TeacherForcing produces scores per (input_token, output_token),
+            # so there may be multiple trailing dimensions to reduce.
+            while values.ndim > 1:
                 values = np.abs(values).max(axis=-1)
 
             # Build token→score list sorted by importance
             paired = [
-                {"token": str(tok), "score": round(float(abs(val)), 6)}
+                {"token": str(tok), "score": round(float(np.abs(val)), 6)}
                 for tok, val in zip(tokens, values)
                 if str(tok).strip()
             ]
@@ -192,11 +274,13 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path, log_callback
                 _log(f"    SHAP: {i + 1}/{len(prompts)} samples", log_callback)
 
         # Save SHAP HTML visualisation if possible
+        shap_html: str | None = None
         try:
-            html_path = xai_dir / "shap_text.html"
             html_content = shap.plots.text(shap_values, display=False)
             if html_content:
-                Path(html_path).write_text(str(html_content))
+                shap_html = str(html_content)
+                html_path = xai_dir / "shap_text.html"
+                Path(html_path).write_text(shap_html)
                 logger.info("Saved SHAP text plot to %s", html_path)
         except Exception as exc:
             logger.debug("Could not save SHAP HTML plot: %s", exc)
@@ -204,16 +288,32 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path, log_callback
         explained = sum(1 for s in sample_explanations if s["token_scores"])
         _log(f"  ✓ SHAP complete: {explained}/{len(sample_explanations)} samples\n", log_callback)
 
-        return {
+        result: dict = {
             "method": "shap",
             "num_samples": len(sample_explanations),
             "sample_explanations": sample_explanations,
         }
+        if shap_html:
+            result["html"] = shap_html
+        return result
 
     except Exception as exc:
         logger.warning("SHAP method failed: %s", exc, exc_info=True)
         _log(f"  ✗ SHAP failed: {exc}\n", log_callback)
         return None
+    finally:
+        # Release references that keep the model pinned on GPU.
+        # These objects (pipeline, explainer, masker) hold refs to the
+        # model/tokenizer and will prevent VRAM from being freed.
+        try:
+            del pipe, explainer, masker
+        except NameError:
+            pass
+        try:
+            del shap_values
+        except NameError:
+            pass
+        _cleanup_gpu()
 
 
 # ── Method 2: TransformerLens ──────────────────────────────────────
@@ -246,7 +346,7 @@ def _run_transformer_lens(
 
         sample_explanations = []
         for i, entry in enumerate(samples):
-            prompt = _build_prompt(entry)
+            prompt = _build_prompt(entry, tokenizer)
             true_label = entry.get("output", "")
 
             try:
@@ -346,7 +446,7 @@ def _run_attention(model, tokenizer, samples: list[dict], log_callback=None) -> 
 
         sample_explanations = []
         for i, entry in enumerate(samples):
-            prompt = _build_prompt(entry)
+            prompt = _build_prompt(entry, tokenizer)
             true_label = entry.get("output", "")
 
             try:
@@ -516,6 +616,12 @@ def run_xai(state: PipelineState, config: RunnableConfig) -> dict:
     base_model = state["base_model"]
     training_config = state.get("training_config", {})
 
+    # XAI hardware defaults: fp16 + 8-bit quantization
+    if training_config.get("precision") in (None, "bf16"):
+        training_config = {**training_config, "precision": "fp16"}
+    if training_config.get("quantization_bit") is None:
+        training_config = {**training_config, "quantization_bit": 8}
+
     # ── Load and merge model ───────────────────────────────────
     header = (
         "\n" + "=" * 60 + "\n"
@@ -559,6 +665,7 @@ def run_xai(state: PipelineState, config: RunnableConfig) -> dict:
             method_results.append(attn_result)
 
     # ── Unload model ───────────────────────────────────────────
+    _release_model(model)
     del model, tokenizer
     _cleanup_gpu()
     _log("✓ Model unloaded, GPU memory freed\n", log_callback)

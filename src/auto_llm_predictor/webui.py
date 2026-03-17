@@ -35,6 +35,7 @@ import shutil
 import threading
 import uuid
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -713,7 +714,61 @@ def create_app() -> FastAPI:
 
         return {"run_id": run_id}
 
-    # ── Inference: single ─────────────────────────────────────
+    # ── Inference: single (background thread with SSE for XAI) ─
+    def _run_single_inference_bg(
+        run: RunState, output_dir: str, run_dir: str,
+        sample_features: dict, xai: bool,
+        precision: str, quantization_bit: int | None,
+    ) -> None:
+        """Execute single inference in a background thread, emitting SSE events.
+
+        Emits ``single_prediction`` as soon as the prediction is ready,
+        then ``single_xai`` when XAI analysis completes, and finally
+        ``single_complete`` to signal the end.
+        """
+        from auto_llm_predictor.inference import run_single_inference
+
+        try:
+            run.status = "running"
+            _emit(run, "status", {"status": "running", "message": "Single inference started"})
+
+            def _on_prediction(pred_data: dict) -> None:
+                _emit(run, "single_prediction", {
+                    "prediction": pred_data.get("prediction", ""),
+                    "target_mapping": pred_data.get("target_mapping", {}),
+                })
+
+            result = run_single_inference(
+                output_dir=output_dir,
+                run_dir=run_dir,
+                sample_features=sample_features,
+                xai=xai,
+                precision=precision,
+                quantization_bit=quantization_bit,
+                log_callback=lambda msg: _emit(run, "log", {"message": msg}),
+                prediction_callback=_on_prediction,
+            )
+
+            # Emit XAI results separately if present
+            xai_results = result.get("xai_results")
+            if xai_results:
+                _emit(run, "single_xai", {"xai_results": xai_results})
+
+            run.status = "completed"
+            run.final_state = result
+            _emit(run, "single_complete", {
+                "message": "Single inference complete!",
+                "prediction": result.get("prediction", ""),
+                "target_mapping": result.get("target_mapping", {}),
+                "xai_results": xai_results,
+            })
+
+        except Exception as exc:
+            logger.exception("Single inference error for run %s", run.run_id)
+            run.status = "error"
+            run.error = str(exc)
+            _emit(run, "error", {"message": str(exc)})
+
     @app.post("/api/infer/single")
     async def single_inference(
         output_dir: str = Form(...),
@@ -728,6 +783,13 @@ def create_app() -> FastAPI:
         output_dir = normalize_path(str(Path(output_dir).resolve()))
         run_dir = normalize_path(str(Path(run_dir).resolve()))
 
+        # XAI hardware defaults: fp16 + 8-bit quantization
+        if xai:
+            if precision == "bf16":
+                precision = "fp16"
+            if quantization_bit is None:
+                quantization_bit = 8
+
         if not Path(output_dir).exists():
             return JSONResponse(status_code=400, content={"error": f"Output directory not found: {output_dir}"})
         if not Path(run_dir).exists():
@@ -738,12 +800,37 @@ def create_app() -> FastAPI:
         except json.JSONDecodeError as e:
             return JSONResponse(status_code=400, content={"error": f"Invalid features JSON: {e}"})
 
+        # When XAI is enabled, run in background thread with SSE streaming
+        if xai:
+            run_id = f"single-{datetime.now().strftime('%Y%m%d-%H%M%S')}"
+            loop = asyncio.get_event_loop()
+            run = RunState(
+                run_id=run_id,
+                status="pending",
+                queue=asyncio.Queue(),
+                loop=loop,
+            )
+            _prune_completed_runs()
+            _runs[run_id] = run
+
+            t = threading.Thread(
+                target=_run_single_inference_bg,
+                args=(run, output_dir, run_dir, sample_features,
+                      xai, precision, quantization_bit),
+                daemon=True,
+            )
+            run.thread = t
+            t.start()
+
+            return {"run_id": run_id}
+
+        # Without XAI, run synchronously (fast path)
         try:
             result = run_single_inference(
                 output_dir=output_dir,
                 run_dir=run_dir,
                 sample_features=sample_features,
-                xai=xai,
+                xai=False,
                 precision=precision,
                 quantization_bit=quantization_bit,
             )
@@ -766,6 +853,181 @@ def create_app() -> FastAPI:
             return {"features": features}
         except Exception as e:
             return JSONResponse(status_code=500, content={"error": str(e)})
+
+    # ── Inference: parse uploaded CSV for single inference ─────
+    _MAX_ROWS = 10_000
+
+    @app.post("/api/infer/parse-csv")
+    async def parse_csv_for_single(
+        csv_file: UploadFile = File(...),
+        output_dir: str = Form(...),
+    ):
+        import pandas as pd
+        from auto_llm_predictor.inference import get_feature_names, _load_pipeline_state
+
+        output_dir = normalize_path(str(Path(output_dir).resolve()))
+        if not Path(output_dir).exists():
+            return JSONResponse(status_code=400, content={"error": f"Output directory not found: {output_dir}"})
+
+        try:
+            selected = get_feature_names(output_dir)
+            state = _load_pipeline_state(output_dir)
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": f"Failed to load features: {e}"})
+
+        try:
+            df = pd.read_csv(csv_file.file, low_memory=False)
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"error": f"Failed to parse CSV: {e}"})
+
+        target_col = state.get("target_column", "")
+        present = [f for f in selected if f in df.columns]
+        missing = [f for f in selected if f not in df.columns]
+
+        # Include the target column as __label__ when available
+        keep_cols = list(present)
+        has_target = target_col and target_col in df.columns and target_col not in present
+        if has_target:
+            keep_cols.append(target_col)
+
+        truncated = len(df) > _MAX_ROWS
+        if truncated:
+            df = df.head(_MAX_ROWS)
+
+        if keep_cols:
+            df = df[keep_cols].fillna("").astype(str)
+            rows = df.to_dict(orient="records")
+            if has_target:
+                for row in rows:
+                    row["__label__"] = row.pop(target_col, "")
+        else:
+            rows = []
+
+        return {
+            "rows": rows,
+            "total_rows": len(rows),
+            "truncated": truncated,
+            "missing_features": missing,
+            "selected_features": selected,
+        }
+
+    # ── Inference: load rows from training data ──────────────
+    @app.get("/api/infer/training-rows")
+    async def training_rows(output_dir: str, source: str, dataset: str = ""):
+        import pandas as pd
+        from auto_llm_predictor.inference import (
+            get_feature_names,
+            _load_pipeline_state,
+            _parse_input_to_features,
+        )
+
+        output_dir = normalize_path(str(Path(output_dir).resolve()))
+        if not Path(output_dir).exists():
+            return JSONResponse(status_code=400, content={"error": f"Output directory not found: {output_dir}"})
+
+        try:
+            selected = get_feature_names(output_dir)
+            state = _load_pipeline_state(output_dir)
+        except Exception as e:
+            return JSONResponse(status_code=500, content={"error": f"Failed to load state: {e}"})
+
+        if source == "csv":
+            csv_path = state.get("csv_path", "")
+            if not csv_path or not Path(csv_path).is_file():
+                return JSONResponse(status_code=400, content={"error": f"Training CSV not found: {csv_path}"})
+            try:
+                df = pd.read_csv(csv_path, low_memory=False)
+            except Exception as e:
+                return JSONResponse(status_code=400, content={"error": f"Failed to read training CSV: {e}"})
+
+            target_col = state.get("target_column", "")
+            present = [f for f in selected if f in df.columns]
+            missing = [f for f in selected if f not in df.columns]
+
+            # Include the target column as __label__ when available
+            keep_cols = list(present)
+            has_target = target_col and target_col in df.columns and target_col not in present
+            if has_target:
+                keep_cols.append(target_col)
+
+            truncated = len(df) > _MAX_ROWS
+            if truncated:
+                df = df.head(_MAX_ROWS)
+
+            if keep_cols:
+                df = df[keep_cols].fillna("").astype(str)
+                rows = df.to_dict(orient="records")
+                if has_target:
+                    for row in rows:
+                        row["__label__"] = row.pop(target_col, "")
+            else:
+                rows = []
+
+            return {
+                "rows": rows,
+                "total_rows": len(rows),
+                "truncated": truncated,
+                "missing_features": missing,
+                "selected_features": selected,
+            }
+
+        elif source == "jsonl":
+            data_dir = Path(output_dir) / "data"
+            if not data_dir.is_dir():
+                return JSONResponse(status_code=400, content={"error": "Data directory not found"})
+
+            # Discover available JSON datasets
+            skip = {"dataset_info.json"}
+            available = []
+            for p in sorted(data_dir.glob("*.json")):
+                if p.name in skip:
+                    continue
+                try:
+                    with open(p) as f:
+                        entries = json.load(f)
+                    if isinstance(entries, list):
+                        available.append({"name": p.name, "count": len(entries)})
+                except Exception:
+                    continue
+
+            if not available:
+                return JSONResponse(status_code=400, content={"error": "No processed JSON datasets found"})
+
+            # Select which dataset to load
+            target_name = dataset if dataset else available[0]["name"]
+            target_path = data_dir / target_name
+            if not target_path.is_file():
+                return JSONResponse(status_code=400, content={"error": f"Dataset not found: {target_name}"})
+
+            try:
+                with open(target_path) as f:
+                    entries = json.load(f)
+            except Exception as e:
+                return JSONResponse(status_code=400, content={"error": f"Failed to read {target_name}: {e}"})
+
+            truncated = len(entries) > _MAX_ROWS
+            if truncated:
+                entries = entries[:_MAX_ROWS]
+
+            rows = []
+            for entry in entries:
+                feats = _parse_input_to_features(entry.get("input", ""))
+                output_val = entry.get("output", "")
+                if output_val:
+                    feats["__label__"] = output_val
+                rows.append(feats)
+
+            return {
+                "rows": rows,
+                "total_rows": len(rows),
+                "truncated": truncated,
+                "available_datasets": available,
+                "dataset": target_name,
+                "selected_features": selected,
+            }
+
+        else:
+            return JSONResponse(status_code=400, content={"error": f"Invalid source: {source}. Use 'csv' or 'jsonl'."})
 
     # ── Inference: download predictions ───────────────────────
     @app.get("/api/infer/download/{run_id}")

@@ -12,7 +12,7 @@
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="/static/style.css?v=6">
+    <link rel="stylesheet" href="/static/style.css?v=7">
 </head>
 
 <body>
@@ -503,13 +503,69 @@
                                 ↻ Load Features
                             </button>
                         </div>
+                        <!-- Data source selector (shown after features load) -->
+                        <div id="csv-autofill-section" class="csv-autofill-section csv-autofill-section--hidden">
+                            <label class="form__label">Auto-fill from data <span class="form__optional">(optional)</span></label>
+                            <div class="data-source-toggle">
+                                <button type="button" class="data-src-btn data-src-btn--active" data-source="upload">Upload CSV</button>
+                                <button type="button" class="data-src-btn" data-source="training-csv">Training CSV</button>
+                                <button type="button" class="data-src-btn" data-source="processed">Processed Data</button>
+                            </div>
+
+                            <!-- Upload CSV panel -->
+                            <div id="src-upload-panel" class="src-panel">
+                                <div class="file-drop file-drop--sm" id="single-csv-drop">
+                                    <input type="file" id="single-csv-file" accept=".csv">
+                                    <div class="file-drop__text">
+                                        <span>Drop CSV or <em>browse</em></span>
+                                    </div>
+                                    <div class="file-drop__name" id="single-csv-name"></div>
+                                </div>
+                            </div>
+
+                            <!-- Training CSV panel -->
+                            <div id="src-training-panel" class="src-panel src-panel--hidden">
+                                <button type="button" id="load-training-csv-btn" class="btn btn--sm btn--secondary">
+                                    Load Training CSV
+                                </button>
+                                <span id="training-csv-status" class="form__hint"></span>
+                            </div>
+
+                            <!-- Processed data panel -->
+                            <div id="src-processed-panel" class="src-panel src-panel--hidden">
+                                <div class="src-processed-row">
+                                    <select id="processed-dataset" class="form__input form__input--sm processed-dataset-select">
+                                        <option value="">-- select dataset --</option>
+                                    </select>
+                                    <button type="button" id="load-processed-btn" class="btn btn--sm btn--secondary">
+                                        Load
+                                    </button>
+                                </div>
+                                <span id="processed-status" class="form__hint"></span>
+                            </div>
+
+                            <!-- Shared row selector -->
+                            <div id="csv-row-selector" class="csv-row-selector csv-row-selector--hidden">
+                                <div class="csv-row-selector__controls">
+                                    <label class="form__label" for="csv-row-index">Row</label>
+                                    <input type="number" id="csv-row-index" class="form__input form__input--sm csv-row-index-input" min="0" value="0" step="1">
+                                    <span id="csv-row-count" class="form__hint"></span>
+                                </div>
+                                <div id="csv-row-label" class="csv-row-label csv-row-label--hidden"></div>
+                                <div id="csv-missing-notice" class="csv-missing-notice csv-missing-notice--hidden"></div>
+                                <div id="csv-features-list" class="csv-features-list csv-features-list--hidden"></div>
+                            </div>
+                        </div>
+
                         <div id="feature-inputs" class="feature-inputs">
                             <p class="form__hint">Click "Load Features" to populate input fields.</p>
                         </div>
 
                         <div class="form__checkbox-row" style="margin-top: 12px;">
                             <input type="checkbox" id="infer-xai">
-                            <label for="infer-xai">Enable XAI <span class="form__optional">(explanations)</span></label>
+                            <label for="infer-xai">Enable XAI <span class="form__optional">(explanations)</span>
+                                <span class="xai-warn-icon" title="XAI is computationally expensive and may significantly increase inference time and resource usage.">&#9888;</span>
+                            </label>
                         </div>
                     </fieldset>
 
@@ -565,7 +621,7 @@
         </div>
     </main>
 
-    <script src="/static/app.js?v=6"></script>
+    <script src="/static/app.js?v=7"></script>
 </body>
 
 </html>
