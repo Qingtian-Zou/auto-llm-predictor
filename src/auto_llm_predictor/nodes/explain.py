@@ -191,28 +191,26 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path, log_callback
         # Estimate token count for progress tracking
         n_tokens = len(tokenizer.encode(prompts[0])) if prompts else 0
 
-        shap_model = shap.models.TeacherForcing(
-            model, tokenizer,
-        )
-
-        # Wrap the shap model call to report progress.
-        _orig_call = shap_model.__call__
-
-        _shap_calls = {"n": 0, "last_pct": -1}
+        # Subclass TeacherForcing so __call__ is on the class (Python's MRO
+        # finds it) and SHAP's isinstance checks still pass.
         _est_total = 2 * n_tokens + 1
+        _shap_progress = {"calls": 0, "last_pct": -1}
 
-        def _tracked_call(*args, **kwargs):
-            _shap_calls["n"] += 1
-            pct = min(100, int(_shap_calls["n"] / _est_total * 100))
-            if log_callback and pct >= _shap_calls["last_pct"] + 5:
-                _shap_calls["last_pct"] = pct
-                log_callback(
-                    f"    SHAP evaluating masks: {_shap_calls['n']}/{_est_total} "
-                    f"(~{pct}%)"
-                )
-            return _orig_call(*args, **kwargs)
-        shap_model.__call__ = _tracked_call
+        class _TrackedTeacherForcing(shap.models.TeacherForcing):
+            """TeacherForcing that reports mask-evaluation progress."""
 
+            def __call__(self, X, Y):
+                _shap_progress["calls"] += 1
+                pct = min(100, int(_shap_progress["calls"] / _est_total * 100))
+                if log_callback and pct >= _shap_progress["last_pct"] + 5:
+                    _shap_progress["last_pct"] = pct
+                    log_callback(
+                        f"    SHAP evaluating masks: "
+                        f"{_shap_progress['calls']}/{_est_total} (~{pct}%)"
+                    )
+                return super().__call__(X, Y)
+
+        shap_model = _TrackedTeacherForcing(model, tokenizer)
         explainer = shap.Explainer(shap_model, masker)
 
         _log("  Running SHAP explanations...", log_callback)
