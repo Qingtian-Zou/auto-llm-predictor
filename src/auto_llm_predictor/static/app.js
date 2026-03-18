@@ -598,6 +598,8 @@
             fd.append("flash_attn", document.getElementById("infer-flash-attn").value);
             const qbitBatch = document.getElementById("infer-quantization-bit").value;
             if (qbitBatch) fd.append("quantization_bit", qbitBatch);
+            const batchXai = document.getElementById("infer-batch-xai");
+            if (batchXai && batchXai.checked) fd.append("xai", "true");
 
             try {
                 const res = await fetch("/api/infer/batch", { method: "POST", body: fd });
@@ -618,21 +620,31 @@
                 evtSource.onmessage = function (ev) {
                     const evt = JSON.parse(ev.data);
                     if (evt.event === "log") {
-                        appendInferLog(evt.data.message || "");
+                        appendInferLog(evt.message || "");
                     } else if (evt.event === "status") {
-                        appendInferLog(evt.data.message || "", "status");
+                        appendInferLog(evt.message || "", "status");
                     } else if (evt.event === "complete") {
-                        appendInferLog("✓ " + (evt.data.message || "Complete!"), "status");
+                        appendInferLog("✓ " + (evt.message || "Complete!"), "status");
                         inferResultsPanel.classList.remove("results-panel--hidden");
-                        inferResultsContent.innerHTML =
-                            '<p><strong>Samples:</strong> ' + (evt.data.num_samples || 0) + '</p>' +
-                            '<p><strong>Output:</strong> ' + (evt.data.infer_output || '') + '</p>' +
+                        let batchHtml =
+                            '<p><strong>Samples:</strong> ' + (evt.num_samples || 0) + '</p>' +
+                            '<p><strong>Output:</strong> ' + (evt.infer_output || '') + '</p>' +
                             '<a href="/api/infer/download/' + runId + '" class="btn btn--sm btn--secondary" download>⬇ Download Predictions</a>';
+                        if (evt.xai_results && evt.xai_results.length) {
+                            batchHtml += '<hr style="margin:16px 0">';
+                            batchHtml += '<h4>XAI Results</h4>';
+                            batchHtml += renderXaiResults(evt.xai_results);
+                            if (evt.xai_report_path) {
+                                batchHtml += '<p style="margin-top:8px"><strong>XAI Report:</strong> ' +
+                                    escapeHtml(evt.xai_report_path) + '</p>';
+                            }
+                        }
+                        inferResultsContent.innerHTML = batchHtml;
                         inferBatchBtn.disabled = false;
                         inferBatchBtn.textContent = "Run Batch Inference";
                         evtSource.close();
                     } else if (evt.event === "error") {
-                        appendInferLog("✗ Error: " + (evt.data.message || ""), "error");
+                        appendInferLog("✗ Error: " + (evt.message || ""), "error");
                         inferBatchBtn.disabled = false;
                         inferBatchBtn.textContent = "Run Batch Inference";
                         evtSource.close();
@@ -1175,6 +1187,114 @@
                     inferSingleBtn.disabled = false;
                     inferSingleBtn.innerHTML = '🔍 Predict';
                 }
+            }
+        });
+    }
+
+    // ══════════════════════════════════════════════════════════
+    // STANDALONE XAI TAB
+    // ══════════════════════════════════════════════════════════
+
+    const xaiForm = document.getElementById("xai-form");
+    const xaiRunBtn = document.getElementById("xai-run-btn");
+    const xaiLog = document.getElementById("xai-log");
+    const xaiResultsPanel = document.getElementById("xai-results-panel");
+    const xaiResultsContent = document.getElementById("xai-results-content");
+
+    function appendXaiLog(msg, cls) {
+        if (!xaiLog) return;
+        const line = document.createElement("div");
+        line.className = "log__line" + (cls ? " log__line--" + cls : "");
+        line.textContent = msg;
+        xaiLog.appendChild(line);
+        xaiLog.scrollTop = xaiLog.scrollHeight;
+    }
+
+    if (xaiForm) {
+        xaiForm.addEventListener("submit", async function (e) {
+            e.preventDefault();
+
+            const outputDir = document.getElementById("xai-output-dir").value.trim();
+            const runDir = document.getElementById("xai-run-dir").value.trim();
+
+            if (!outputDir || !runDir) {
+                alert("Please fill in both Training Output Directory and Run Directory.");
+                return;
+            }
+
+            // Clear previous
+            xaiLog.innerHTML = "";
+            xaiResultsPanel.classList.add("results-panel--hidden");
+            xaiRunBtn.disabled = true;
+            xaiRunBtn.innerHTML = '<span class="spinner"></span> Running…';
+
+            const fd = new FormData();
+            fd.append("output_dir", outputDir);
+            fd.append("run_dir", runDir);
+            fd.append("max_samples", document.getElementById("xai-max-samples").value);
+            fd.append("precision", document.getElementById("xai-precision").value);
+            const qbit = document.getElementById("xai-quantization-bit").value;
+            if (qbit) fd.append("quantization_bit", qbit);
+
+            try {
+                const res = await fetch("/api/xai/run", { method: "POST", body: fd });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    appendXaiLog("Error: " + (data.error || "Unknown error"), "error");
+                    xaiRunBtn.disabled = false;
+                    xaiRunBtn.textContent = "Run XAI Analysis";
+                    return;
+                }
+
+                const runId = data.run_id;
+                appendXaiLog("XAI analysis started (run " + runId + ")", "status");
+
+                // Connect SSE
+                const evtSource = new EventSource("/api/events/" + runId);
+                evtSource.onmessage = function (ev) {
+                    const evt = JSON.parse(ev.data);
+                    if (evt.event === "log") {
+                        appendXaiLog(evt.message || "");
+                    } else if (evt.event === "status") {
+                        appendXaiLog(evt.message || "", "status");
+                    } else if (evt.event === "xai_complete") {
+                        appendXaiLog("✓ " + (evt.message || "Complete!"), "status");
+                        xaiResultsPanel.classList.remove("results-panel--hidden");
+                        let html =
+                            '<p><strong>Samples:</strong> ' + (evt.num_samples || 0) + '</p>' +
+                            '<p><strong>Methods:</strong> ' + (evt.methods_succeeded || []).join(", ") + '</p>';
+                        if (evt.xai_results && evt.xai_results.length) {
+                            html += '<hr style="margin:16px 0">';
+                            html += renderXaiResults(evt.xai_results);
+                        }
+                        if (evt.xai_report_path) {
+                            html += '<p style="margin-top:8px"><strong>Report:</strong> ' +
+                                escapeHtml(evt.xai_report_path) + '</p>';
+                            html += '<a href="/api/xai/download/' + runId +
+                                '" class="btn btn--sm btn--secondary" download>⬇ Download XAI Report</a>';
+                        }
+                        xaiResultsContent.innerHTML = html;
+                        xaiRunBtn.disabled = false;
+                        xaiRunBtn.textContent = "Run XAI Analysis";
+                        evtSource.close();
+                    } else if (evt.event === "error") {
+                        appendXaiLog("✗ Error: " + (evt.message || ""), "error");
+                        xaiRunBtn.disabled = false;
+                        xaiRunBtn.textContent = "Run XAI Analysis";
+                        evtSource.close();
+                    }
+                };
+                evtSource.onerror = function () {
+                    appendXaiLog("SSE connection lost", "error");
+                    xaiRunBtn.disabled = false;
+                    xaiRunBtn.textContent = "Run XAI Analysis";
+                    evtSource.close();
+                };
+            } catch (err) {
+                appendXaiLog("Network error: " + err.message, "error");
+                xaiRunBtn.disabled = false;
+                xaiRunBtn.textContent = "Run XAI Analysis";
             }
         });
     }

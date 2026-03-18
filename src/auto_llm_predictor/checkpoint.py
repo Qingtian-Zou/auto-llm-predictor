@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -26,13 +27,24 @@ _PATH_FIELDS = {
     "train_predictions_path", "test_predictions_path",
 }
 
+# Path fields that refer to external files (not under output_dir) — keep absolute
+_EXTERNAL_PATH_FIELDS = {"csv_path", "test_csv_path", "output_dir"}
+
+# Path fields that are always under output_dir — stored as relative for portability
+_RELATIVE_PATH_FIELDS = _PATH_FIELDS - _EXTERNAL_PATH_FIELDS
+
 
 def save_state(state: dict[str, Any], output_dir: str) -> str:
     """Save pipeline state to JSON in the output directory.
 
+    Internal paths (under ``output_dir``) are stored as relative paths for
+    portability across different mount points and machines.  External paths
+    (``csv_path``, ``test_csv_path``) remain absolute.
+
     Returns the path to the saved state file.
     """
     state_path = Path(output_dir) / _STATE_FILE
+    resolved_output = normalize_path(str(Path(output_dir).resolve()))
 
     # Filter out non-serializable fields and normalize path values
     serializable = {}
@@ -43,6 +55,16 @@ def save_state(state: dict[str, Any], output_dir: str) -> str:
             json.dumps(value)  # test serializability
             if key in _PATH_FIELDS and isinstance(value, str) and value:
                 value = normalize_path(value)
+                # Convert internal paths to relative (relative to output_dir)
+                if key in _RELATIVE_PATH_FIELDS and os.path.isabs(value):
+                    try:
+                        rel = os.path.relpath(value, resolved_output)
+                        # Only use relative if it stays under output_dir
+                        # (doesn't start with ".." traversals that leave it)
+                        if not rel.startswith(".."):
+                            value = rel
+                    except ValueError:
+                        pass  # different drives on Windows — keep absolute
             serializable[key] = value
         except (TypeError, ValueError):
             logger.debug("Skipping non-serializable field: %s", key)
@@ -63,6 +85,10 @@ def save_state(state: dict[str, Any], output_dir: str) -> str:
 
 def load_state(output_dir: str) -> dict[str, Any]:
     """Load pipeline state from a previous experiment's output directory.
+
+    Relative paths (stored by ``save_state``) are resolved against the
+    user-provided ``output_dir``.  Absolute paths from older checkpoints
+    are normalized as before — this ensures backward compatibility.
 
     Returns the deserialized state dict with an empty ``messages`` list.
 
@@ -88,10 +114,19 @@ def load_state(output_dir: str) -> dict[str, Any]:
             f"or fix the JSON manually."
         ) from e
 
-    # Normalize any path fields that may contain mixed separators
+    resolved_output = normalize_path(str(Path(output_dir).resolve()))
+
     for key in _PATH_FIELDS:
         val = state.get(key)
-        if isinstance(val, str) and val:
+        if not isinstance(val, str) or not val:
+            continue
+        if key in _RELATIVE_PATH_FIELDS and not os.path.isabs(val):
+            # Relative path — resolve against user-provided output_dir
+            state[key] = normalize_path(
+                str(Path(resolved_output) / val),
+            )
+        else:
+            # Absolute path (external or legacy checkpoint) — normalize only
             state[key] = normalize_path(val)
 
     state["messages"] = []  # fresh message list for the new session

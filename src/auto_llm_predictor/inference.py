@@ -137,6 +137,7 @@ def run_batch_inference(
     precision: str = "bf16",
     flash_attn: str = "auto",
     quantization_bit: int | None = None,
+    xai: bool = False,
     log_callback: callable | None = None,
 ) -> dict:
     """Run batch inference on a new CSV using the trained adapter.
@@ -184,7 +185,9 @@ def run_batch_inference(
     if not base_model:
         raise ValueError("Pipeline state is missing 'base_model'.")
 
-    # ── Validate adapter ───────────────────────────────────────
+    # ── Validate adapter (fallback to user-provided run_dir) ───
+    if not Path(adapter_path).exists():
+        adapter_path = normalize_path(str(Path(run_dir) / "sft"))
     if not Path(adapter_path).exists():
         raise FileNotFoundError(f"Adapter not found at {adapter_path}")
 
@@ -275,10 +278,220 @@ def run_batch_inference(
             f"LlamaFactory prediction failed. Output:\n{lmf_output[-2000:]}"
         )
 
+    num_samples = sum(1 for _ in open(predictions_path))
+
+    # ── Optional XAI analysis ─────────────────────────────────
+    xai_report_path = ""
+    xai_results = None
+    if xai:
+        try:
+            xai_result = run_batch_xai(
+                output_dir=output_dir,
+                run_dir=run_dir,
+                infer_output=infer_output,
+                predictions_path=str(predictions_path),
+                log_callback=log_callback,
+            )
+            xai_report_path = xai_result.get("xai_report_path", "")
+            xai_results = xai_result.get("xai_results")
+        except Exception as exc:
+            logger.warning("Batch XAI failed: %s", exc, exc_info=True)
+            msg = f"XAI analysis failed (predictions are still available): {exc}"
+            print(f"\n⚠ {msg}\n", flush=True)
+            if log_callback:
+                log_callback(msg)
+
     return {
         "predictions_path": str(predictions_path),
         "infer_output": infer_output,
-        "num_samples": sum(1 for _ in open(predictions_path)),
+        "num_samples": num_samples,
+        "xai_report_path": xai_report_path,
+        "xai_results": xai_results,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Batch XAI
+# ---------------------------------------------------------------------------
+
+def _build_xai_samples(
+    infer_data_path: str,
+    predictions_path: str,
+    max_samples: int = 50,
+) -> list[dict]:
+    """Pair inference data with predictions to build XAI-compatible samples.
+
+    Each returned sample has ``instruction``, ``input``, and ``output`` fields.
+    The ``output`` is populated from the corresponding prediction so that
+    SHAP's TeacherForcing has a target to work with.
+    """
+    with open(infer_data_path) as f:
+        infer_data = json.load(f)
+
+    predictions: list[dict] = []
+    with open(predictions_path) as f:
+        for line in f:
+            line = line.strip()
+            if line:
+                predictions.append(json.loads(line))
+
+    n = min(len(infer_data), len(predictions), max_samples)
+    samples: list[dict] = []
+    for i in range(n):
+        entry = infer_data[i]
+        pred = predictions[i].get("predict", "")
+        samples.append({
+            "instruction": entry.get("instruction", ""),
+            "input": entry.get("input", ""),
+            "output": pred,
+        })
+    return samples
+
+
+def run_batch_xai(
+    *,
+    output_dir: str,
+    run_dir: str,
+    infer_output: str,
+    predictions_path: str,
+    log_callback: Callable[[str], None] | None = None,
+) -> dict:
+    """Run XAI analysis on batch inference results.
+
+    Loads the model in-process, pairs inference data with predictions,
+    and runs SHAP -> TransformerLens -> Attention (fallback).
+
+    Returns
+    -------
+    dict
+        ``{"xai_report_path": str, "xai_results": list, "methods_succeeded": list}``
+    """
+    from auto_llm_predictor.nodes.explain import (
+        _merge_and_load,
+        _run_shap,
+        _run_transformer_lens,
+        _run_attention,
+        _release_model,
+        _cleanup_gpu,
+        _save_heatmap,
+        _TOP_K_TOKENS,
+    )
+
+    def _log(msg: str) -> None:
+        print(msg, flush=True)
+        if log_callback:
+            log_callback(msg)
+
+    # ── Load pipeline state ────────────────────────────────────
+    state = _load_pipeline_state(output_dir)
+    base_model = state.get("base_model", "")
+    adapter_path = normalize_path(
+        state.get("adapter_path", str(Path(run_dir) / "sft")),
+    )
+    training_config = dict(state.get("training_config", {}))
+
+    if not base_model:
+        raise ValueError("Pipeline state is missing 'base_model'.")
+    # Fallback: prefer user-provided run_dir when state path is stale
+    if not Path(adapter_path).exists():
+        adapter_path = normalize_path(str(Path(run_dir) / "sft"))
+    if not Path(adapter_path).exists():
+        raise FileNotFoundError(f"Adapter not found at {adapter_path}")
+
+    # ── Build XAI samples ──────────────────────────────────────
+    infer_data_path = str(Path(infer_output) / "data" / "all_data.json")
+    if not Path(infer_data_path).exists():
+        raise FileNotFoundError(
+            f"Inference data not found at {infer_data_path}"
+        )
+
+    samples = _build_xai_samples(infer_data_path, predictions_path)
+    if not samples:
+        raise ValueError("No samples available for XAI analysis.")
+
+    # ── XAI hardware defaults: fp16 + 8-bit quantization ──────
+    if training_config.get("precision") in (None, "bf16"):
+        training_config["precision"] = "fp16"
+    if training_config.get("quantization_bit") is None:
+        training_config["quantization_bit"] = 8
+
+    # ── Load and merge model ───────────────────────────────────
+    header = (
+        "\n" + "=" * 60 + "\n"
+        "BATCH XAI — Explainability Analysis\n"
+        f"Model: {base_model}\n"
+        f"Adapter: {adapter_path}\n"
+        f"Samples: {len(samples)}\n"
+        "Methods: SHAP -> TransformerLens -> Attention (fallback)\n"
+        + "=" * 60 + "\n"
+    )
+    _log(header)
+
+    model, tokenizer = _merge_and_load(base_model, adapter_path, training_config)
+
+    # ── Run XAI methods ────────────────────────────────────────
+    xai_dir = Path(infer_output) / "xai"
+    xai_dir.mkdir(parents=True, exist_ok=True)
+
+    method_results: list[dict] = []
+
+    # 1. SHAP
+    _log("Starting SHAP explanation...")
+    shap_result = _run_shap(model, tokenizer, samples, xai_dir, log_callback)
+    if shap_result:
+        method_results.append(shap_result)
+
+    # 2. TransformerLens
+    _log("Starting TransformerLens explanation...")
+    tl_result = _run_transformer_lens(
+        model, tokenizer, base_model, samples, xai_dir, log_callback,
+    )
+    if tl_result:
+        method_results.append(tl_result)
+
+    # 3. Attention fallback — only if both SHAP and TransformerLens failed
+    if not method_results:
+        _log("Both SHAP and TransformerLens unavailable — trying attention fallback...")
+        attn_result = _run_attention(model, tokenizer, samples, log_callback)
+        if attn_result:
+            method_results.append(attn_result)
+
+    # ── Unload model ───────────────────────────────────────────
+    _release_model(model)
+    del model, tokenizer
+    _cleanup_gpu()
+    _log("Model unloaded, GPU memory freed\n")
+
+    if not method_results:
+        _log("All XAI methods failed.")
+        return {"xai_report_path": "", "xai_results": [], "methods_succeeded": []}
+
+    # ── Build unified report ───────────────────────────────────
+    report = {
+        "model": base_model,
+        "adapter_path": adapter_path,
+        "num_samples": len(samples),
+        "top_k_tokens": _TOP_K_TOKENS,
+        "methods_succeeded": [r["method"] for r in method_results],
+        "results": method_results,
+    }
+
+    report_path = xai_dir / "xai_report.json"
+    with open(report_path, "w") as f:
+        json.dump(report, f, indent=2, ensure_ascii=False)
+    logger.info("Saved batch XAI report to %s", report_path)
+
+    # ── Heatmap visualisation ──────────────────────────────────
+    heatmap_path = xai_dir / "xai_heatmap.png"
+    _save_heatmap(method_results, str(heatmap_path))
+
+    methods = ", ".join(r["method"] for r in method_results)
+    _log(f"\nBatch XAI complete ({methods}). Report at {report_path}\n")
+
+    return {
+        "xai_report_path": str(report_path),
+        "xai_results": method_results,
+        "methods_succeeded": [r["method"] for r in method_results],
     }
 
 
@@ -402,6 +615,9 @@ def run_single_inference(
 
     if not base_model:
         raise ValueError("Pipeline state is missing 'base_model'.")
+    # Fallback: prefer user-provided run_dir when state path is stale
+    if not Path(adapter_path).exists():
+        adapter_path = normalize_path(str(Path(run_dir) / "sft"))
     if not Path(adapter_path).exists():
         raise FileNotFoundError(f"Adapter not found at {adapter_path}")
 
@@ -669,6 +885,11 @@ Examples:
   auto-llm-predictor-infer --infer-output-dir output/my_dataset \\
     --infer-run-dir output/my_dataset/run_20260307_120000 \\
     --infer-single --infer-xai
+
+  # Batch inference with XAI
+  auto-llm-predictor-infer --infer-output-dir output/my_dataset \\
+    --infer-run-dir output/my_dataset/run_20260307_120000 \\
+    --infer-csv data/new_data.csv --infer-xai
 """,
     )
 
@@ -699,7 +920,7 @@ Examples:
     )
     parser.add_argument(
         "--infer-xai", action="store_true",
-        help="Run XAI explanations on single prediction (requires --infer-single)",
+        help="Run XAI explanations on predictions (batch or single mode)",
     )
     parser.add_argument(
         "--infer-quantization-bit", type=int, choices=[4, 8], default=None,
@@ -782,6 +1003,7 @@ Examples:
                 precision=args.infer_precision,
                 flash_attn=args.infer_flash_attn,
                 quantization_bit=args.infer_quantization_bit,
+                xai=args.infer_xai,
             )
 
             print("\n" + "=" * 60)
@@ -790,6 +1012,8 @@ Examples:
             print(f"Predictions:  {result['predictions_path']}")
             print(f"Samples:      {result['num_samples']}")
             print(f"Output:       {result['infer_output']}")
+            if result.get("xai_report_path"):
+                print(f"XAI Report:   {result['xai_report_path']}")
             print("=" * 60)
 
     except KeyboardInterrupt:

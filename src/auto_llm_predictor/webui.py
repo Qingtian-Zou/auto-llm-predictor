@@ -185,9 +185,9 @@ def _run_pipeline(run: RunState, initial_state: dict) -> None:
             state = run.app.get_state(run.thread_config)
 
             if not state.tasks:
-                run.status = "completed"
                 run.final_state = state.values
                 _emit(run, "complete", _format_results(state.values))
+                run.status = "completed"
                 return
 
             # Look for an interrupt
@@ -200,9 +200,9 @@ def _run_pipeline(run: RunState, initial_state: dict) -> None:
                     break
 
             if interrupt_value is None:
-                run.status = "completed"
                 run.final_state = state.values
                 _emit(run, "complete", _format_results(state.values))
+                run.status = "completed"
                 return
 
             # Surface the interrupt to the browser
@@ -299,7 +299,8 @@ def _format_results(final_state: dict) -> dict:
 def _run_batch_inference(run: RunState, output_dir: str, run_dir: str,
                          csv_path: str, infer_output: str,
                          precision: str, flash_attn: str,
-                         quantization_bit: int | None) -> None:
+                         quantization_bit: int | None,
+                         xai: bool = False) -> None:
     """Execute batch inference, emitting SSE events."""
     from auto_llm_predictor.inference import run_batch_inference
 
@@ -315,20 +316,59 @@ def _run_batch_inference(run: RunState, output_dir: str, run_dir: str,
             precision=precision,
             flash_attn=flash_attn,
             quantization_bit=quantization_bit,
+            xai=xai,
             log_callback=lambda msg: _emit(run, "log", {"message": msg}),
         )
 
-        run.status = "completed"
         run.final_state = result
         _emit(run, "complete", {
             "message": "Batch inference complete!",
             "predictions_path": result.get("predictions_path", ""),
             "num_samples": result.get("num_samples", 0),
             "infer_output": result.get("infer_output", ""),
+            "xai_report_path": result.get("xai_report_path", ""),
+            "xai_results": result.get("xai_results"),
         })
+        run.status = "completed"
 
     except Exception as exc:
         logger.exception("Batch inference error for run %s", run.run_id)
+        run.status = "error"
+        run.error = str(exc)
+        _emit(run, "error", {"message": str(exc)})
+
+
+def _run_standalone_xai_bg(run: RunState, output_dir: str, run_dir: str,
+                           max_samples: int, precision: str,
+                           quantization_bit: int | None) -> None:
+    """Execute standalone XAI analysis, emitting SSE events."""
+    from auto_llm_predictor.xai import run_standalone_xai
+
+    try:
+        run.status = "running"
+        _emit(run, "status", {"status": "running", "message": "Standalone XAI analysis started"})
+
+        result = run_standalone_xai(
+            output_dir=output_dir,
+            run_dir=run_dir,
+            max_samples=max_samples,
+            precision=precision,
+            quantization_bit=quantization_bit,
+            log_callback=lambda msg: _emit(run, "log", {"message": msg}),
+        )
+
+        run.final_state = result
+        _emit(run, "xai_complete", {
+            "message": "Standalone XAI complete!",
+            "xai_report_path": result.get("xai_report_path", ""),
+            "xai_results": result.get("xai_results"),
+            "methods_succeeded": result.get("methods_succeeded", []),
+            "num_samples": result.get("num_samples", 0),
+        })
+        run.status = "completed"
+
+    except Exception as exc:
+        logger.exception("Standalone XAI error for run %s", run.run_id)
         run.status = "error"
         run.error = str(exc)
         _emit(run, "error", {"message": str(exc)})
@@ -676,6 +716,7 @@ def create_app() -> FastAPI:
         precision: str = Form("bf16"),
         flash_attn: str = Form("auto"),
         quantization_bit: int | None = Form(None),
+        xai: bool = Form(False),
     ):
         output_dir = normalize_path(str(Path(output_dir).resolve()))
         run_dir = normalize_path(str(Path(run_dir).resolve()))
@@ -706,7 +747,7 @@ def create_app() -> FastAPI:
         t = threading.Thread(
             target=_run_batch_inference,
             args=(run, output_dir, run_dir, str(csv_path), infer_output,
-                  precision, flash_attn, quantization_bit),
+                  precision, flash_attn, quantization_bit, xai),
             daemon=True,
         )
         run.thread = t
@@ -1044,6 +1085,60 @@ def create_app() -> FastAPI:
             path=pred_path,
             filename="predictions.jsonl",
             media_type="application/octet-stream",
+        )
+
+    # ── Standalone XAI: run ───────────────────────────────────
+    @app.post("/api/xai/run")
+    async def start_standalone_xai(
+        output_dir: str = Form(...),
+        run_dir: str = Form(...),
+        max_samples: int = Form(50),
+        precision: str = Form("fp16"),
+        quantization_bit: int | None = Form(8),
+    ):
+        output_dir = normalize_path(str(Path(output_dir).resolve()))
+        run_dir = normalize_path(str(Path(run_dir).resolve()))
+
+        if not Path(output_dir).exists():
+            return JSONResponse(status_code=400, content={"error": f"Output directory not found: {output_dir}"})
+        if not Path(run_dir).exists():
+            return JSONResponse(status_code=400, content={"error": f"Run directory not found: {run_dir}"})
+
+        run_id = f"xai-{uuid.uuid4().hex[:12]}"
+        loop = asyncio.get_event_loop()
+        run = RunState(
+            run_id=run_id,
+            queue=asyncio.Queue(),
+            loop=loop,
+        )
+        _prune_completed_runs()
+        _runs[run_id] = run
+
+        t = threading.Thread(
+            target=_run_standalone_xai_bg,
+            args=(run, output_dir, run_dir, max_samples, precision, quantization_bit),
+            daemon=True,
+        )
+        run.thread = t
+        t.start()
+
+        return {"run_id": run_id}
+
+    # ── Standalone XAI: download report ───────────────────────
+    @app.get("/api/xai/download/{run_id}")
+    async def download_xai_report(run_id: str):
+        run = _runs.get(run_id)
+        if not run:
+            return JSONResponse(status_code=404, content={"error": "Run not found"})
+
+        report_path = run.final_state.get("xai_report_path", "")
+        if not report_path or not Path(report_path).is_file():
+            return JSONResponse(status_code=404, content={"error": "XAI report not available yet."})
+
+        return FileResponse(
+            path=report_path,
+            filename="xai_report.json",
+            media_type="application/json",
         )
 
     return app

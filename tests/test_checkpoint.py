@@ -6,6 +6,7 @@ Covers: save_state/load_state round-trip, error handling, and atomic writes.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
@@ -49,6 +50,77 @@ class TestCheckpoint:
 # ---------------------------------------------------------------------------
 # Atomic checkpoint writes
 # ---------------------------------------------------------------------------
+
+class TestRelativePaths:
+    """Tests for relative path storage and resolution."""
+
+    def test_internal_paths_stored_as_relative(self, tmp_path):
+        from auto_llm_predictor.checkpoint import save_state
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        run_dir = output_dir / "run_001"
+        run_dir.mkdir()
+
+        state = {
+            "output_dir": str(output_dir),
+            "run_dir": str(run_dir),
+            "adapter_path": str(run_dir / "sft"),
+            "test_data_path": str(output_dir / "data" / "test.json"),
+            "csv_path": "/external/data.csv",
+        }
+        save_state(state, str(output_dir))
+
+        raw = json.loads((output_dir / ".pipeline_state.json").read_text())
+        # Internal paths should be relative
+        assert raw["run_dir"] == "run_001"
+        assert raw["adapter_path"] == str(Path("run_001") / "sft")
+        assert raw["test_data_path"] == str(Path("data") / "test.json")
+        # External path stays absolute
+        assert raw["csv_path"] == "/external/data.csv"
+
+    def test_relative_paths_resolved_on_load(self, tmp_path):
+        from auto_llm_predictor.checkpoint import load_state, save_state
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+        run_dir = output_dir / "run_001"
+        run_dir.mkdir()
+
+        state = {
+            "output_dir": str(output_dir),
+            "run_dir": str(run_dir),
+            "adapter_path": str(run_dir / "sft"),
+        }
+        save_state(state, str(output_dir))
+
+        loaded = load_state(str(output_dir))
+        # Should resolve back to absolute paths under output_dir
+        assert Path(loaded["run_dir"]).is_absolute()
+        assert Path(loaded["adapter_path"]).is_absolute()
+        assert loaded["run_dir"].endswith("run_001")
+        assert loaded["adapter_path"].endswith(str(Path("run_001") / "sft"))
+
+    def test_backward_compat_absolute_paths(self, tmp_path):
+        """Old checkpoints with absolute paths should still load correctly."""
+        from auto_llm_predictor.checkpoint import load_state
+
+        output_dir = tmp_path / "output"
+        output_dir.mkdir()
+
+        # Write a legacy checkpoint with absolute paths
+        legacy_state = {
+            "run_dir": str(output_dir / "run_001"),
+            "adapter_path": str(output_dir / "run_001" / "sft"),
+            "csv_path": "/external/data.csv",
+        }
+        (output_dir / ".pipeline_state.json").write_text(json.dumps(legacy_state))
+
+        loaded = load_state(str(output_dir))
+        assert loaded["run_dir"].endswith("run_001")
+        assert loaded["adapter_path"].endswith(str(Path("run_001") / "sft"))
+        assert loaded["csv_path"] == "/external/data.csv"
+
 
 class TestCheckpointAtomicWrite:
     """Tests for the atomic write logic in checkpoint.save_state."""

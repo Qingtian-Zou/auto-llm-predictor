@@ -37,6 +37,7 @@
     <nav class="tab-bar" id="tab-bar">
         <button class="tab tab--active" data-tab="training">Training</button>
         <button class="tab" data-tab="inference">Inference</button>
+        <button class="tab" data-tab="xai">XAI</button>
     </nav>
 
     <!-- ── Main layout ───────────────────────────────── -->
@@ -477,6 +478,13 @@
                             </div>
                         </fieldset>
 
+                        <div class="form__checkbox-row" style="margin-top: 12px;">
+                            <input type="checkbox" id="infer-batch-xai">
+                            <label for="infer-batch-xai">Enable XAI <span class="form__optional">(explanations)</span>
+                                <span class="xai-warn-icon" title="XAI is computationally expensive. Capped at 50 samples.">&#9888;</span>
+                            </label>
+                        </div>
+
                         <div class="form__actions">
                             <button type="submit" id="infer-batch-btn" class="btn btn--primary">
                                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18"
@@ -619,9 +627,107 @@
                 </div>
             </section>
         </div>
+
+        <!-- ======================================================
+             XAI TAB
+             ====================================================== -->
+        <div class="tab-content" id="tab-xai">
+            <!-- LEFT: XAI Config Panel -->
+            <section class="panel config-panel">
+                <h2 class="panel__title">
+                    <span class="panel__dot"></span>
+                    XAI Configuration
+                </h2>
+
+                <form id="xai-form" class="form">
+                    <fieldset class="form__group">
+                        <legend class="form__legend">Directories</legend>
+                        <label class="form__label" for="xai-output-dir">Training Output Directory <span
+                                class="req">*</span>
+                            <span class="tooltip-wrap">
+                                <span class="tooltip-icon">i</span>
+                                <span class="tooltip-text">Contains <code>.pipeline_state.json</code> and <code>data/test.json</code></span>
+                            </span>
+                        </label>
+                        <input type="text" id="xai-output-dir" placeholder="output/my_dataset" class="form__input"
+                            required>
+
+                        <label class="form__label" for="xai-run-dir">Run Directory <span class="req">*</span>
+                            <span class="tooltip-wrap">
+                                <span class="tooltip-icon">i</span>
+                                <span class="tooltip-text">Contains the LoRA adapter under <code>sft/</code></span>
+                            </span>
+                        </label>
+                        <input type="text" id="xai-run-dir"
+                            placeholder="output/my_dataset/run_20260307_120000" class="form__input" required>
+                    </fieldset>
+
+                    <details class="form__group form__details">
+                        <summary class="form__legend form__legend--click">Settings<span
+                                class="chevron">›</span></summary>
+                        <div class="form__grid">
+                            <div>
+                                <label class="form__label" for="xai-max-samples">Max Samples</label>
+                                <input type="number" id="xai-max-samples" value="50" min="1" max="200"
+                                    class="form__input form__input--sm">
+                            </div>
+                            <div>
+                                <label class="form__label" for="xai-precision">Precision</label>
+                                <select id="xai-precision" class="form__input form__input--sm">
+                                    <option value="fp16" selected>fp16</option>
+                                    <option value="bf16">bf16</option>
+                                </select>
+                            </div>
+                            <div>
+                                <label class="form__label" for="xai-quantization-bit">Quantization</label>
+                                <select id="xai-quantization-bit" class="form__input form__input--sm">
+                                    <option value="8" selected>8-bit</option>
+                                    <option value="4">4-bit</option>
+                                    <option value="">None</option>
+                                </select>
+                            </div>
+                        </div>
+                    </details>
+
+                    <div class="form__actions">
+                        <button type="submit" id="xai-run-btn" class="btn btn--primary">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="18"
+                                height="18">
+                                <polygon points="5 3 19 12 5 21 5 3" />
+                            </svg>
+                            Run XAI Analysis
+                        </button>
+                    </div>
+                </form>
+            </section>
+
+            <!-- RIGHT: XAI Output Panel -->
+            <section class="panel output-panel">
+                <!-- XAI results -->
+                <div id="xai-results-panel" class="results-panel results-panel--hidden">
+                    <h3 class="results-panel__title">
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="20"
+                            height="20">
+                            <polyline points="20 6 9 17 4 12" />
+                        </svg>
+                        XAI Results
+                    </h3>
+                    <div id="xai-results-content" class="results-panel__content"></div>
+                </div>
+
+                <!-- XAI log -->
+                <div class="log-section">
+                    <h2 class="panel__title">
+                        <span class="panel__dot panel__dot--green"></span>
+                        XAI Log
+                    </h2>
+                    <div id="xai-log" class="log"></div>
+                </div>
+            </section>
+        </div>
     </main>
 
-    <script src="/static/app.js?v=7"></script>
+    <script src="/static/app.js?v=8"></script>
 </body>
 
 </html>
