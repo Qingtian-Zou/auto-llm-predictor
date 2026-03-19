@@ -1210,6 +1210,70 @@
         xaiLog.scrollTop = xaiLog.scrollHeight;
     }
 
+    let xaiEvtSource = null;
+    let xaiSseRetries = 0;
+    const XAI_SSE_MAX_RETRIES = 5;
+
+    function resetXaiBtn() {
+        if (!xaiRunBtn) return;
+        xaiRunBtn.disabled = false;
+        xaiRunBtn.textContent = "Run XAI Analysis";
+    }
+
+    function connectXaiSSE(runId) {
+        if (xaiEvtSource) xaiEvtSource.close();
+        xaiSseRetries = 0;
+        xaiEvtSource = new EventSource("/api/events/" + runId);
+
+        xaiEvtSource.onmessage = function (ev) {
+            xaiSseRetries = 0;
+            let evt;
+            try { evt = JSON.parse(ev.data); } catch { return; }
+
+            if (evt.event === "log") {
+                appendXaiLog(evt.message || "");
+            } else if (evt.event === "status") {
+                appendXaiLog(evt.message || "", "status");
+            } else if (evt.event === "xai_complete") {
+                appendXaiLog("✓ " + (evt.message || "Complete!"), "status");
+                xaiResultsPanel.classList.remove("results-panel--hidden");
+                let html =
+                    '<p><strong>Samples:</strong> ' + (evt.num_samples || 0) + '</p>' +
+                    '<p><strong>Methods:</strong> ' + (evt.methods_succeeded || []).join(", ") + '</p>';
+                if (evt.xai_results && evt.xai_results.length) {
+                    html += '<hr style="margin:16px 0">';
+                    html += renderXaiResults(evt.xai_results);
+                }
+                if (evt.xai_report_path) {
+                    html += '<p style="margin-top:8px"><strong>Report:</strong> ' +
+                        escapeHtml(evt.xai_report_path) + '</p>';
+                    html += '<a href="/api/xai/download/' + runId +
+                        '" class="btn btn--sm btn--secondary" download>⬇ Download XAI Report</a>';
+                }
+                xaiResultsContent.innerHTML = html;
+                resetXaiBtn();
+                xaiEvtSource.close();
+            } else if (evt.event === "error") {
+                appendXaiLog("✗ Error: " + (evt.message || ""), "error");
+                resetXaiBtn();
+                xaiEvtSource.close();
+            }
+        };
+
+        xaiEvtSource.onerror = function () {
+            if (xaiEvtSource.readyState === EventSource.CLOSED) {
+                appendXaiLog("SSE connection closed.", "status");
+            } else {
+                xaiSseRetries++;
+                if (xaiSseRetries >= XAI_SSE_MAX_RETRIES) {
+                    xaiEvtSource.close();
+                    appendXaiLog("SSE connection lost after " + XAI_SSE_MAX_RETRIES + " retries.", "error");
+                    resetXaiBtn();
+                }
+            }
+        };
+    }
+
     if (xaiForm) {
         xaiForm.addEventListener("submit", async function (e) {
             e.preventDefault();
@@ -1242,60 +1306,35 @@
 
                 if (!res.ok) {
                     appendXaiLog("Error: " + (data.error || "Unknown error"), "error");
-                    xaiRunBtn.disabled = false;
-                    xaiRunBtn.textContent = "Run XAI Analysis";
+                    resetXaiBtn();
                     return;
                 }
 
                 const runId = data.run_id;
                 appendXaiLog("XAI analysis started (run " + runId + ")", "status");
-
-                // Connect SSE
-                const evtSource = new EventSource("/api/events/" + runId);
-                evtSource.onmessage = function (ev) {
-                    const evt = JSON.parse(ev.data);
-                    if (evt.event === "log") {
-                        appendXaiLog(evt.message || "");
-                    } else if (evt.event === "status") {
-                        appendXaiLog(evt.message || "", "status");
-                    } else if (evt.event === "xai_complete") {
-                        appendXaiLog("✓ " + (evt.message || "Complete!"), "status");
-                        xaiResultsPanel.classList.remove("results-panel--hidden");
-                        let html =
-                            '<p><strong>Samples:</strong> ' + (evt.num_samples || 0) + '</p>' +
-                            '<p><strong>Methods:</strong> ' + (evt.methods_succeeded || []).join(", ") + '</p>';
-                        if (evt.xai_results && evt.xai_results.length) {
-                            html += '<hr style="margin:16px 0">';
-                            html += renderXaiResults(evt.xai_results);
-                        }
-                        if (evt.xai_report_path) {
-                            html += '<p style="margin-top:8px"><strong>Report:</strong> ' +
-                                escapeHtml(evt.xai_report_path) + '</p>';
-                            html += '<a href="/api/xai/download/' + runId +
-                                '" class="btn btn--sm btn--secondary" download>⬇ Download XAI Report</a>';
-                        }
-                        xaiResultsContent.innerHTML = html;
-                        xaiRunBtn.disabled = false;
-                        xaiRunBtn.textContent = "Run XAI Analysis";
-                        evtSource.close();
-                    } else if (evt.event === "error") {
-                        appendXaiLog("✗ Error: " + (evt.message || ""), "error");
-                        xaiRunBtn.disabled = false;
-                        xaiRunBtn.textContent = "Run XAI Analysis";
-                        evtSource.close();
-                    }
-                };
-                evtSource.onerror = function () {
-                    appendXaiLog("SSE connection lost", "error");
-                    xaiRunBtn.disabled = false;
-                    xaiRunBtn.textContent = "Run XAI Analysis";
-                    evtSource.close();
-                };
+                connectXaiSSE(runId);
             } catch (err) {
                 appendXaiLog("Network error: " + err.message, "error");
-                xaiRunBtn.disabled = false;
-                xaiRunBtn.textContent = "Run XAI Analysis";
+                resetXaiBtn();
             }
         });
     }
+
+    // ── XAI: Auto-reconnect on page load ─────────────────────
+    (async function checkActiveXaiRun() {
+        try {
+            const res = await fetch("/api/xai/active");
+            const data = await res.json();
+            if (data.run_id) {
+                appendXaiLog("Reconnected to active XAI run [" + data.run_id + "] (" + data.status + ")", "status");
+                if (xaiRunBtn) {
+                    xaiRunBtn.disabled = true;
+                    xaiRunBtn.innerHTML = '<span class="spinner"></span> Running…';
+                }
+                connectXaiSSE(data.run_id);
+            }
+        } catch (err) {
+            // No active XAI run or server unreachable — stay idle
+        }
+    })();
 })();

@@ -1087,6 +1087,15 @@ def create_app() -> FastAPI:
             media_type="application/octet-stream",
         )
 
+    # ── Standalone XAI: active run discovery ──────────────────
+    @app.get("/api/xai/active")
+    async def get_active_xai_run():
+        """Return the most recent XAI run that is still in progress."""
+        for run in reversed(list(_runs.values())):
+            if run.run_id.startswith("xai-") and run.status in ("running", "pending"):
+                return {"run_id": run.run_id, "status": run.status}
+        return {"run_id": None}
+
     # ── Standalone XAI: run ───────────────────────────────────
     @app.post("/api/xai/run")
     async def start_standalone_xai(

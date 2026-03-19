@@ -136,6 +136,16 @@ auto-llm-predictor-infer \
 
 Key inference flags: `--infer-csv`, `--infer-single`, `--infer-xai`, `--infer-precision` (`bf16`/`fp16`), `--infer-quantization-bit` (`4`/`8`), `--infer-flash-attn`.
 
+### Standalone XAI
+
+```bash
+auto-llm-predictor-xai \
+    --output-dir output/my_dataset \
+    --run-dir output/my_dataset/run_20260307_120000
+```
+
+Key XAI flags: `--max-samples` (default `50`), `--precision` (`bf16`/`fp16`), `--quantization-bit` (`4`/`8`), `--flash-attn` (`auto`/`fa2`/`disabled`).
+
 ### Environment Configuration
 
 ```env
@@ -223,7 +233,7 @@ output/<csv_stem>/
 
 ```
 src/auto_llm_predictor/
-├── main.py / webui.py / inference.py / graph.py / state.py
+├── main.py / webui.py / inference.py / xai.py / graph.py / state.py
 ├── checkpoint.py / utils.py
 ├── prompts/  explore.py  plan.py  codegen.py  debug.py  verify.py  balance.py
 └── nodes/
