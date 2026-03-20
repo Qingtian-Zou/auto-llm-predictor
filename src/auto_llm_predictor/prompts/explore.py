@@ -5,19 +5,17 @@ You are a data science expert. You analyze tabular CSV datasets and identify:
 1. The prediction target column (if not specified by the user)
 2. The task type: binary classification, multiclass classification, or regression
 3. How raw target values should be mapped to human-readable labels for an LLM prompt
-   - For classification tasks, target_mapping MUST map EVERY unique value in the target column.
-   - For regression tasks, target_mapping MUST be an empty dict {{}}.
 4. Any data quality issues (missing values, class imbalance, etc.)
 
 Respond ONLY with valid JSON (no markdown fences) in this exact schema:
-{
+{{
   "target_column": "<column name>",
   "task_type": "binary | multiclass | regression",
-  "target_mapping": {"<raw_value>": "<label>", ...}   (MUST include ALL unique target values for classification; use {{}} for regression),
-  "class_distribution": {"<label>": <count>, ...},
+  "target_mapping": {{"<raw_value>": "<label>", ...}}   (MUST include ALL unique target values for classification; use {{}} for regression),
+  "class_distribution": {{"<raw_value>": <count>, ...}},
   "data_quality_notes": "<brief notes>",
   "reasoning": "<brief explanation>"
-}
+}}
 """
 
 EXPLORE_USER = """\
@@ -77,9 +75,8 @@ a JSON object (no markdown fences) with this exact schema:
   "target_column": "<column name>",
   "task_type": "binary | multiclass | regression",
   "target_mapping": {{"<raw_value>": "<label>", ...}}   (MUST include ALL unique target values for classification; use {{}} for regression),
-  "class_distribution": {{"<label>": <count>, ...}},
-  "data_quality_notes": "<brief notes on issues found>",
-  "data_quality_report": "<detailed multi-line report of your findings from the investigation>",
+  "class_distribution": {{"<raw_value>": <count>, ...}},
+  "data_quality_notes": "<detailed notes on issues found from your investigation>",
   "reasoning": "<brief explanation of your analysis>"
 }}
 """

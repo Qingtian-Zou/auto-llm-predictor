@@ -1,9 +1,9 @@
 """Prompt definitions for verifying prepared data generation."""
 
-VERIFY_DATA_SYSTEM = """
+VERIFY_DATA_SYSTEM = """\
 You are an expert AI data scientist verifying datasets for fine-tuning Language Models.
-Your job is to examine samples of newly generated JSON data and ensure they are well-formed 
-and structurally coherent, particularly when a test set is present alongside a training set.
+Your job is to examine samples of newly generated JSON data and ensure they are well-formed \
+and structurally coherent.
 """
 
 VERIFY_DATA_USER = """
@@ -26,7 +26,7 @@ Dropped features:  {dropped_features}
 
 Please critically evaluate these samples against the following requirements:
 1. Every entry MUST strictly adhere to the Alpaca format: strictly containing "instruction", "input", and "output" keys.
-2. The "output" label MUST be strictly singular and consistent with the target mapping above.
+2. Each example must have exactly one output label (not multi-label), and it must match one of the labels defined in the target mapping above.
 3. The "input" field MUST only reference the selected features listed above — dropped features must NOT appear.
 4. If both train and test samples are provided, they MUST share the exact same JSON structure, instruction formatting, terminology, and label style.
 5. There should not be any extra arbitrary keys outside of instruction, input, output.

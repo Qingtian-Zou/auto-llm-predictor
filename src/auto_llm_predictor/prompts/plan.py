@@ -8,7 +8,7 @@ detailed data preparation plan.
 The goal is to convert a CSV file into LlamaFactory-compatible Alpaca JSON format:
 {
   "instruction": "<system-level task description>",
-  "input": "<patient/sample data as readable text>",
+  "input": "<row data as readable text>",
   "output": "<predicted label>"
 }
 
@@ -18,10 +18,10 @@ Respond ONLY with valid JSON (no markdown fences) in this exact schema:
   "dropped_features": ["colX", "colY", ...],
   "feature_selection_reason": "<why these features were chosen and others dropped>",
   "instruction_template": "<the instruction text to use in every example>",
-  "input_format": "<description of how to format each row's features as text>",
-  "output_format": "<description of how to format the target label>",
-  "target_mapping": {"<raw_value>": "<label>"}   (MUST include ALL classes from the provided target_mapping; use {} for regression),
-  "test_ratio": 0.2,
+  "input_format": "<description of how to format each row's features as text, e.g. 'Key: Value pairs, one per line, like Age: 45\\nGender: Male'>",
+  "output_format": "<description of how to format the target label, e.g. 'The mapped label string, e.g. Positive'>",
+  "target_mapping": {"<raw_value>": "<label>"}   (MUST include ALL classes from the provided target_mapping; use {{}} for regression),
+  "test_ratio": 0.2   (used by a later splitting step, NOT by the data preparation script),
   "balance_strategy": "none | oversample | undersample",
   "data_cleaning_steps": ["step1", "step2", ...],
   "reasoning": "<brief explanation>"
@@ -37,7 +37,7 @@ Target analysis:
 - Target column: {target_column}
 - Task type: {task_type}
 - Target mapping: {target_mapping}
-- Class distribution: {class_distribution}
+- Class distribution (keys are raw target values): {class_distribution}
 - Data quality notes: {data_quality_notes}
 
 The dataset has {n_columns} columns total.

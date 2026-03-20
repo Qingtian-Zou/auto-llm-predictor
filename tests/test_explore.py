@@ -420,7 +420,7 @@ class TestFallbackExplore:
         assert result["task_type"] == "binary"
         assert result["target_mapping"] == {"yes": "Yes", "no": "No"}
         assert result["exploration_steps"] == []
-        assert result["data_quality_report"] == ""
+        assert result["data_quality_notes"] == ""
         assert "data_profile" in result
         assert "messages" in result
 
@@ -484,5 +484,5 @@ class TestExploreData:
         assert result["task_type"] == "binary"
         assert "target_mapping" in result
         assert "exploration_steps" in result
-        assert "data_quality_report" in result
+        assert "data_quality_notes" in result
         assert "messages" in result

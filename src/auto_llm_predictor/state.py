@@ -70,8 +70,8 @@ class PipelineState(TypedDict):
     exploration_steps: list[dict]
     """Log of tool calls made by the exploration agent during data investigation."""
 
-    data_quality_report: str
-    """Comprehensive data quality report produced by the exploration agent."""
+    data_quality_notes: str
+    """Data quality notes produced by the exploration agent."""
 
     # ── Code generation ────────────────────────────────────────────
     prep_plan: str

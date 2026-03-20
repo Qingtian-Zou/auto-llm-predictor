@@ -5,7 +5,7 @@ You are an expert Python programmer. You write clean, production-quality \
 data balancing scripts. Your scripts MUST:
 
 1. Be completely self-contained (no imports from custom packages)
-2. Use only: json, random, pathlib, sys, collections
+2. Use only: json, random, pathlib, sys, os, collections
 3. Read existing JSON files, apply the balancing strategy, and save them to a new file
 4. Handle edge cases gracefully
 5. Print class distribution BEFORE and AFTER balancing clearly
@@ -24,7 +24,6 @@ Each entry has keys: "instruction", "input", "output"
 The "output" field contains the class label.
 
 === BALANCING TASK ===
-Task type: {task_type}
 Balance strategy: {balance_strategy}
 
 === REQUIREMENTS ===
@@ -45,7 +44,12 @@ The script must:
 
 BALANCE_RETRY_CONTEXT = """\
 === PREVIOUS ATTEMPT FAILED ===
-The previous script failed with this error:
+The previous script was:
+```python
+{previous_code}
+```
+
+It failed with this error:
 {error}
 
 Fix the issues and generate a corrected script.
@@ -66,12 +70,15 @@ def format_balance_prompt(
     task_type: str,
     balance_strategy: str,
     previous_error: str = "",
+    previous_code: str = "",
     user_feedback: str = "",
 ) -> str:
     """Format the user prompt for the balance codegen node."""
     error_context = ""
     if previous_error:
-        error_context = BALANCE_RETRY_CONTEXT.format(error=previous_error)
+        error_context = BALANCE_RETRY_CONTEXT.format(
+            previous_code=previous_code, error=previous_error,
+        )
 
     user_feedback_context = ""
     if user_feedback:
@@ -80,7 +87,6 @@ def format_balance_prompt(
     return BALANCE_USER.format(
         data_json_path=data_json_path,
         output_json_path=output_json_path,
-        task_type=task_type,
         balance_strategy=balance_strategy,
         error_context=error_context,
         user_feedback_context=user_feedback_context,

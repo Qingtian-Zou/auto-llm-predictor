@@ -25,10 +25,12 @@ def write_prep_code(state: PipelineState, *, llm) -> dict:
     # Parse the plan (it was stored as a JSON string)
     plan = json.loads(state["prep_plan"])
 
-    # Build the error context from the previous attempt if any
+    # Build the error context from the previous attempt if any.
+    # If user_feedback is present, the plan was updated; suppress old code
+    # so the LLM regenerates from the new plan instead of patching stale code.
     previous_error = ""
     previous_code = ""
-    if state.get("prep_result") and not state.get("prep_succeeded", True):
+    if not state.get("user_feedback") and state.get("prep_result") and not state.get("prep_succeeded", True):
         previous_error = state["prep_result"]
         previous_code = state.get("prep_code", "")
 

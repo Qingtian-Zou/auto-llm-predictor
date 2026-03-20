@@ -308,7 +308,7 @@ def _fallback_explore(state: PipelineState, *, llm, data_profile: str) -> dict:
         "task_type": analysis["task_type"],
         "target_mapping": analysis["target_mapping"],
         "exploration_steps": [],
-        "data_quality_report": "",
+        "data_quality_notes": "",
         "messages": [
             HumanMessage(
                 content=f"[explore_data] CSV profiled (single-shot fallback). "
@@ -331,7 +331,7 @@ def explore_data(state: PipelineState, *, llm) -> dict:
     tool calling.
 
     Writes: data_profile, target_column, task_type, target_mapping,
-            exploration_steps, data_quality_report, messages
+            exploration_steps, data_quality_notes, messages
     """
     csv_path = state["csv_path"]
     logger.info("Profiling CSV: %s", csv_path)
@@ -423,9 +423,7 @@ def explore_data(state: PipelineState, *, llm) -> dict:
     _validate_and_correct_analysis(analysis, csv_path)
 
     # --- Extract data quality report ---
-    data_quality_report = analysis.get("data_quality_report", "")
-    if not data_quality_report:
-        data_quality_report = analysis.get("data_quality_notes", "")
+    data_quality_notes = analysis.get("data_quality_notes", "")
 
     return {
         "data_profile": data_profile,
@@ -433,7 +431,7 @@ def explore_data(state: PipelineState, *, llm) -> dict:
         "task_type": analysis["task_type"],
         "target_mapping": analysis["target_mapping"],
         "exploration_steps": tool_call_log,
-        "data_quality_report": data_quality_report,
+        "data_quality_notes": data_quality_notes,
         "messages": [
             HumanMessage(
                 content=f"[explore_data] Agent explored CSV ({len(tool_call_log)} tool calls). "

@@ -5,7 +5,7 @@ You are an expert Python programmer. You write clean, production-quality \
 data preparation scripts. Your scripts MUST:
 
 1. Be completely self-contained (no imports from custom packages)
-2. Use only: pandas, numpy, json, sklearn, random, pathlib, argparse, sys
+2. Use only: pandas, numpy, json, sklearn, random, pathlib, argparse, sys, os, math
 3. Read the CSV, apply the preparation plan, and produce output files
 4. Handle edge cases (missing values, unexpected types) gracefully
 5. Print progress messages to stdout
@@ -48,7 +48,8 @@ The script should:
   * "instruction": the instruction template (same for every row)
   * "input": selected features formatted as readable text
   * "output": the target label (for classification: mapped using target_mapping, MUST preserve ALL classes; for regression: the raw numeric value as a string)
-- DO NOT split data — splitting is handled by a separate step
+- DO NOT randomly split data into train/test — that is handled by a later step. If a separate test CSV is provided, process it independently as described above.
+- DO NOT apply any class balancing (oversampling/undersampling) — that is handled by a separate step
 - Save the JSON files
 - Print summary statistics (total samples, class distribution)
 

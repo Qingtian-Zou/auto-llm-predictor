@@ -59,8 +59,10 @@ def write_balance_code(state: PipelineState, *, llm) -> dict:
 
     # Build error context from previous attempt
     previous_error = ""
+    previous_code = ""
     if state.get("balance_result") and not state.get("balance_succeeded", True):
         previous_error = state["balance_result"]
+        previous_code = state.get("balance_code", "")
 
     user_prompt = format_balance_prompt(
         data_json_path=data_json_path,
@@ -68,6 +70,7 @@ def write_balance_code(state: PipelineState, *, llm) -> dict:
         task_type=state.get("task_type", "multiclass"),
         balance_strategy=balance_strategy,
         previous_error=previous_error,
+        previous_code=previous_code,
         user_feedback=balance_feedback,
     )
 
