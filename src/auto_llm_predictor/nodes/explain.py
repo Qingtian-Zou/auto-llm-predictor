@@ -37,15 +37,6 @@ _MAX_SAMPLES = 50
 _TOP_K_TOKENS = 15
 
 
-# ── Routing ────────────────────────────────────────────────────────
-
-def check_xai_enabled(state: PipelineState) -> str:
-    """Routing function: run XAI node only if --xai was passed."""
-    if state.get("xai_enabled", False):
-        return "run_xai"
-    return "__end__"
-
-
 # ── Model loading ──────────────────────────────────────────────────
 
 def _merge_and_load(base_model: str, adapter_path: str, training_config: dict):
@@ -68,7 +59,7 @@ def _merge_and_load(base_model: str, adapter_path: str, training_config: dict):
 
     load_kwargs: dict = {
         "trust_remote_code": True,
-        "torch_dtype": dtype,
+        "dtype": dtype,
         "device_map": "auto",
     }
 
@@ -560,145 +551,3 @@ def _save_heatmap(results: list[dict], output_path: str) -> bool:
     logger.info("Saved heatmap to %s", output_path)
     return True
 
-
-# ── Skip result helper ─────────────────────────────────────────────
-
-def _skip_result(reason: str) -> dict:
-    """Build a standard skip/failure return dict for run_xai."""
-    return {
-        "xai_report_path": "",
-        "messages": [HumanMessage(content=f"[run_xai] {reason}")],
-    }
-
-
-# ── Main node ──────────────────────────────────────────────────────
-
-def run_xai(state: PipelineState, config: RunnableConfig) -> dict:
-    """Generate token-level explanations using SHAP, TransformerLens, and attention.
-
-    Priority: SHAP → TransformerLens → Attention (fallback).
-    All methods that succeed are included in the report.
-
-    Writes: xai_report_path, messages
-    """
-    log_callback = config.get("configurable", {}).get("log_callback")
-
-    # ── Skip guards ────────────────────────────────────────────
-    if not state.get("xai_enabled", False):
-        logger.info("XAI not enabled — skipping.")
-        return {}
-
-    adapter_path = state.get("adapter_path", "")
-    if not adapter_path or not Path(adapter_path).exists():
-        logger.warning("Adapter not found at %s — skipping XAI.", adapter_path)
-        return _skip_result("SKIPPED — adapter not found.")
-
-    if not state.get("finetune_succeeded", False):
-        logger.warning("Fine-tuning did not succeed — skipping XAI.")
-        return _skip_result("SKIPPED — fine-tuning did not succeed.")
-
-    # ── Load test data ─────────────────────────────────────────
-    test_data_path = state.get("test_data_path", "")
-    if not test_data_path or not Path(test_data_path).exists():
-        logger.warning("Test data not found — skipping XAI.")
-        return _skip_result("SKIPPED — test data not found.")
-
-    with open(test_data_path) as f:
-        test_data = json.load(f)
-
-    if not test_data:
-        logger.warning("Test data is empty — skipping XAI.")
-        return _skip_result("SKIPPED — test data is empty.")
-
-    samples = test_data[:_MAX_SAMPLES]
-    base_model = state["base_model"]
-    training_config = state.get("training_config", {})
-
-    # XAI hardware defaults: fp16 + 8-bit quantization
-    if training_config.get("precision") in (None, "bf16"):
-        training_config = {**training_config, "precision": "fp16"}
-    if training_config.get("quantization_bit") is None:
-        training_config = {**training_config, "quantization_bit": 8}
-
-    # ── Load and merge model ───────────────────────────────────
-    header = (
-        "\n" + "=" * 60 + "\n"
-        "EXPLAINABILITY (XAI)\n"
-        f"Model: {base_model}\n"
-        f"Adapter: {adapter_path}\n"
-        f"Samples: {len(samples)}\n"
-        "Methods: SHAP → TransformerLens → Attention (fallback)\n"
-        + "=" * 60 + "\n"
-    )
-    _log(header, log_callback)
-
-    try:
-        model, tokenizer = _merge_and_load(base_model, adapter_path, training_config)
-    except Exception as exc:
-        logger.exception("Failed to load model for XAI")
-        return _skip_result(f"FAILED — could not load model: {exc}")
-
-    # ── Run all methods in priority order ──────────────────────
-    run_dir = Path(state.get("run_dir", state["output_dir"]))
-    xai_dir = run_dir / "xai"
-    xai_dir.mkdir(parents=True, exist_ok=True)
-
-    method_results = []
-
-    # 1. SHAP
-    shap_result = _run_shap(model, tokenizer, samples, xai_dir, log_callback)
-    if shap_result:
-        method_results.append(shap_result)
-
-    # 2. TransformerLens
-    tl_result = _run_transformer_lens(model, tokenizer, base_model, samples, xai_dir, log_callback)
-    if tl_result:
-        method_results.append(tl_result)
-
-    # 3. Attention fallback — only if both SHAP and TransformerLens failed
-    if not method_results:
-        _log("  Both SHAP and TransformerLens unavailable — trying attention fallback...", log_callback)
-        attn_result = _run_attention(model, tokenizer, samples, log_callback)
-        if attn_result:
-            method_results.append(attn_result)
-
-    # ── Unload model ───────────────────────────────────────────
-    _release_model(model)
-    del model, tokenizer
-    _cleanup_gpu()
-    _log("✓ Model unloaded, GPU memory freed\n", log_callback)
-
-    if not method_results:
-        return _skip_result("FAILED — all XAI methods failed.")
-
-    # ── Build unified report ───────────────────────────────────
-    report = {
-        "model": base_model,
-        "adapter_path": adapter_path,
-        "num_samples": len(samples),
-        "top_k_tokens": _TOP_K_TOKENS,
-        "methods_succeeded": [r["method"] for r in method_results],
-        "results": method_results,
-    }
-
-    report_path = xai_dir / "xai_report.json"
-    with open(report_path, "w") as f:
-        json.dump(report, f, indent=2, ensure_ascii=False)
-    logger.info("Saved XAI report to %s", report_path)
-
-    # ── Heatmap visualisation ──────────────────────────────────
-    heatmap_path = xai_dir / "xai_heatmap.png"
-    _save_heatmap(method_results, str(heatmap_path))
-
-    # ── Summary ────────────────────────────────────────────────
-    methods = ", ".join(r["method"] for r in method_results)
-    summary = f"XAI complete ({methods}). Report at {report_path}"
-
-    _log(f"\n✓ {summary}\n", log_callback)
-
-    return {
-        "xai_report_path": str(report_path),
-        "messages": [
-            HumanMessage(content=f"[run_xai] {summary}"),
-        ],
-    }

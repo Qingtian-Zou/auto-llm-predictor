@@ -158,7 +158,6 @@ def _stream_graph(run: RunState, input_data: dict | Any) -> None:
                 })
 
         # Intercept evaluation results from updates so we can surface them
-        # immediately, before the optional XAI node runs.
         if mode == "updates" and isinstance(chunk, dict) and "run_evaluation" in chunk:
             eval_output = chunk["run_evaluation"]
             if "eval_results" in eval_output:
@@ -420,7 +419,6 @@ def create_app() -> FastAPI:
         flash_attn: str = Form("auto"),
         precision: str = Form("bf16"),
         finetune_retries: int = Form(3),
-        xai: bool = Form(False),
     ):
         from auto_llm_predictor.graph import build_graph
         from auto_llm_predictor.main import _build_training_config
@@ -502,7 +500,7 @@ def create_app() -> FastAPI:
             "prep_attempts": 0,
             "finetune_attempts": 0,
             "auto_cutoff": auto_cutoff,
-            "xai_enabled": xai,
+
             "training_config": _build_training_config(hp_args),
         }
 
@@ -653,7 +651,7 @@ def create_app() -> FastAPI:
             "lmf_predict_train_yaml": "Predict Train Config (predict_train.yaml)",
             "lmf_predict_test_yaml": "Predict Test Config (predict_test.yaml)",
             "lmf_eval_yaml": "Evaluation Config (eval.yaml)",
-            "xai_report_path": "XAI Report (xai_report.json)",
+
         }
         
         available = []

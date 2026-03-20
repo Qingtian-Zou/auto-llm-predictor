@@ -126,8 +126,7 @@ Examples:
     hp.add_argument("--cutoff-len", type=int, default=4096, help="Max input token length (default: 4096; ignored when --auto-cutoff is set)")
     hp.add_argument("--auto-cutoff", action="store_true", default=False,
                     help="Automatically determine cutoff_len from training data statistics instead of using --cutoff-len")
-    hp.add_argument("--xai", action="store_true", default=False,
-                    help="Run attention-based XAI after evaluation (requires [train] deps and GPU)")
+
     hp.add_argument("--epochs", type=float, default=3.0, help="Number of training epochs (default: 3.0)")
     hp.add_argument("--learning-rate", type=str, default="2.0e-5", help="Learning rate (default: 2.0e-5)")
     hp.add_argument("--batch-size", type=int, default=1, help="Per-device train batch size (default: 2)")
@@ -241,7 +240,7 @@ Examples:
         initial_state["base_model"] = args.model
         initial_state["messages"] = []
         initial_state["auto_cutoff"] = args.auto_cutoff
-        initial_state["xai_enabled"] = args.xai
+
 
         # Merge CLI training_config overrides into the saved state
         saved_config = initial_state.get("training_config", {})
@@ -261,7 +260,7 @@ Examples:
             "prep_attempts": 0,
             "finetune_attempts": 0,
             "auto_cutoff": args.auto_cutoff,
-            "xai_enabled": args.xai,
+
             "training_config": training_config,
         }
 

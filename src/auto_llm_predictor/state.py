@@ -148,12 +148,6 @@ class PipelineState(TypedDict):
     eval_results: dict[str, Any]
     """Evaluation metrics dictionary (accuracy, F1, etc.)."""
 
-    # ── Explainability (XAI) ──────────────────────────────────────
-    xai_enabled: bool
-    """Whether to run XAI explanations after evaluation (--xai flag)."""
-
-    xai_report_path: str
-    """Path to the generated XAI explanation report (JSON)."""
 
     # ── Balancing ──────────────────────────────────────────────────
     balance_code: str

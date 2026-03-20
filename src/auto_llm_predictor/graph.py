@@ -34,7 +34,7 @@ from auto_llm_predictor.nodes.config import generate_lmf_config
 from auto_llm_predictor.nodes.cutoff import determine_cutoff_len
 from auto_llm_predictor.nodes.evaluate import run_evaluation
 from auto_llm_predictor.nodes.execute import check_prep_result, execute_prep_code
-from auto_llm_predictor.nodes.explain import check_xai_enabled, run_xai
+
 from auto_llm_predictor.nodes.explore import explore_data
 from auto_llm_predictor.nodes.feature_selection import check_feature_complexity, select_features
 from auto_llm_predictor.nodes.finetune import run_finetuning
@@ -152,7 +152,7 @@ def build_graph(
     graph.add_node("run_finetuning", run_finetuning)
     graph.add_node("run_prediction", run_prediction)
     graph.add_node("run_evaluation", run_evaluation)
-    graph.add_node("run_xai", run_xai)
+
 
     # ── Wire edges ─────────────────────────────────────────────
     graph.set_entry_point("route_start")
@@ -261,14 +261,7 @@ def build_graph(
 
     graph.add_edge("run_finetuning", "run_prediction")
     graph.add_edge("run_prediction", "run_evaluation")
-
-    # Conditional: run XAI explanations if --xai was passed
-    graph.add_conditional_edges(
-        "run_evaluation",
-        check_xai_enabled,
-        {"run_xai": "run_xai", END: END},
-    )
-    graph.add_edge("run_xai", END)
+    graph.add_edge("run_evaluation", END)
 
     # MemorySaver is required for interrupt() to work
     checkpointer = MemorySaver()

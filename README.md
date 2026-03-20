@@ -50,10 +50,7 @@ graph TD
     R2 -->|change params| F
     G --> H["run_prediction"]
     H --> I["run_evaluation"]
-    I --> X{"--xai?"}
-    X -->|yes| XAI["run_xai"]
-    X -->|no| DONE["END"]
-    XAI --> DONE
+    I --> DONE["END"]
 ```
 
 | Stage | What it does |
@@ -75,7 +72,6 @@ graph TD
 | **review_lmf_config** | ⏸ Human reviews hyperparameters. Accepts `approve`, key-value overrides, or a raw YAML override. |
 | **run_finetuning** | `llamafactory-cli train` with live output; auto-resumes from latest checkpoint on failure |
 | **run_prediction / run_evaluation** | Runs predictions; computes accuracy, F1, confusion matrix |
-| **run_xai** | *(optional)* SHAP → TransformerLens → attention fallback; saves unified JSON report |
 
 ## Installation
 
@@ -191,7 +187,7 @@ CLI flags override `.env` values.
 | `--quantization-bit` | *(none)* | Quantization (`4` or `8`) |
 | `--flash-attn` | `fa2` | Flash attention (`auto`, `fa2`, `disabled`) |
 | `--precision` | `bf16` | Training precision |
-| `--xai` | off | Run XAI after evaluation (requires `[train]` + GPU) |
+
 | `--finetune-retries` | `3` | Max auto-resume attempts on fine-tuning failure |
 
 ## Human-in-the-Loop Review
@@ -226,7 +222,7 @@ output/<csv_stem>/
     ├── sft/                     # LoRA adapter + logs
     ├── predict_train/ predict_test/
     ├── evaluation/results.json
-    └── xai/                     # (if --xai)
+    └── xai/                     # (via standalone XAI)
 ```
 
 ## Project Structure

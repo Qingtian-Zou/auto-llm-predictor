@@ -230,7 +230,7 @@
         "verify_prepared_data", "review_prep_data", "write_balance_code",
         "execute_balance_code", "review_balanced_data", "split_data",
         "determine_cutoff_len", "generate_lmf_config", "review_lmf_config",
-        "run_finetuning", "run_prediction", "run_evaluation", "run_xai",
+        "run_finetuning", "run_prediction", "run_evaluation",
     ];
 
     let activeStepIndex = -1;
