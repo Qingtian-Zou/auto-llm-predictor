@@ -81,6 +81,7 @@ Requires Python ≥ 3.11.
 pip install -e .                  # Core only
 pip install -e ".[train]"         # + LlamaFactory (fine-tuning)
 pip install -e ".[webui]"         # + FastAPI Web UI
+pip install -e ".[ollama]"        # + Ollama native API support
 pip install -e ".[xai]"           # + XAI (also requires [train])
 ```
 
@@ -106,6 +107,10 @@ auto-llm-predictor --csv data.csv --model mistralai/Mistral-7B-Instruct-v0.3 \
 
 # Local model (template auto-detected from config.json)
 auto-llm-predictor --csv data.csv --model /models/Mistral-7B --template llama3
+
+# Use Ollama as the agent LLM backend
+auto-llm-predictor --csv data.csv --model mistralai/Mistral-7B-Instruct-v0.3 \
+    --llm-provider ollama --agent-api-base http://localhost:11434 --agent-model gpt-oss:20b
 ```
 
 ### Web UI
@@ -145,8 +150,9 @@ Key XAI flags: `--max-samples` (default `50`), `--precision` (`bf16`/`fp16`), `-
 ### Environment Configuration
 
 ```env
-openAI_endpoint=192.168.x.y:1234
-auth_key=your-key
+llm_provider=openai              # or "ollama" for Ollama native API
+openAI_endpoint=192.168.x.y:1234 # host:port (no http:// prefix)
+auth_key=your-key                # not required for Ollama
 agent_LLM=gpt-oss-20b
 coder_LLM=qwen3-coder-30b-a3b-instruct
 ```
@@ -165,8 +171,9 @@ CLI flags override `.env` values.
 | `--test-csv` | *(none)* | Separate test CSV (skips splitting) |
 | `--test-ratio` | `0.2` | Test split ratio |
 | `--start-from` | *(none)* | Resume from: `review_prep`, `split`, or `config` |
-| `--agent-api-base` | env: `openAI_endpoint` | OpenAI-compatible API base URL |
-| `--agent-api-key` | env: `auth_key` | API key |
+| `--llm-provider` | `openai` | LLM backend: `openai` or `ollama` (env: `llm_provider`) |
+| `--agent-api-base` | env: `openAI_endpoint` | API base URL (`http://host:port/v1` for openai, `http://host:port` for ollama) |
+| `--agent-api-key` | env: `auth_key` | API key (not required for Ollama) |
 | `--agent-model` | env: `agent_LLM` | Model for reasoning/planning |
 | `--coder-model` | env: `coder_LLM` | Model for code generation |
 | `--agent-temperature` | `0.2` | Sampling temperature |

@@ -61,7 +61,11 @@ def main():
 
     # Read env vars with fallbacks
     env_endpoint = os.getenv("openAI_endpoint", "")
-    env_api_base = f"http://{env_endpoint}/v1" if env_endpoint else ""
+    env_llm_provider = os.getenv("llm_provider", "openai")
+    if env_llm_provider == "ollama":
+        env_api_base = f"http://{env_endpoint}" if env_endpoint else ""
+    else:
+        env_api_base = f"http://{env_endpoint}/v1" if env_endpoint else ""
     env_api_key = os.getenv("auth_key", "")
     env_agent_model = os.getenv("agent_LLM", "")
     env_coder_model = os.getenv("coder_LLM", "")
@@ -114,6 +118,10 @@ Examples:
                         help="Model ID for code generation (env: coder_LLM; falls back to agent-model)")
     parser.add_argument("--agent-temperature", type=float, default=0.2,
                         help="Temperature for the agent LLM")
+    parser.add_argument("--llm-provider", default=env_llm_provider,
+                        choices=["openai", "ollama"],
+                        help="LLM backend: 'openai' for OpenAI-compatible APIs (LM Studio, vLLM), "
+                             "'ollama' for Ollama native API (env: llm_provider; default: openai)")
 
     # Logging
     parser.add_argument("--verbose", "-v", action="store_true",
@@ -167,7 +175,7 @@ Examples:
     missing = []
     if not args.agent_api_base:
         missing.append("--agent-api-base (or set openAI_endpoint in .env)")
-    if not args.agent_api_key:
+    if not args.agent_api_key and args.llm_provider != "ollama":
         missing.append("--agent-api-key (or set auth_key in .env)")
     if not args.agent_model:
         missing.append("--agent-model (or set agent_LLM in .env)")
@@ -176,6 +184,10 @@ Examples:
         for m in missing:
             print(f"  {m}", file=sys.stderr)
         sys.exit(1)
+
+    # Ollama does not require an API key; set a placeholder to avoid None issues
+    if args.llm_provider == "ollama" and not args.agent_api_key:
+        args.agent_api_key = "ollama"
 
     # Validate test ratio
     if not (0 < args.test_ratio < 1):
@@ -213,6 +225,7 @@ Examples:
     cutoff_display = '(auto-detect)' if args.auto_cutoff else str(args.cutoff_len)
     print(f"Cutoff len:   {cutoff_display}")
     coder_model = args.coder_model or args.agent_model
+    print(f"LLM provider: {args.llm_provider}")
     print(f"Agent LLM:    {args.agent_model} @ {args.agent_api_base}")
     print(f"Coder LLM:    {coder_model}")
     print("=" * 60)
@@ -224,6 +237,7 @@ Examples:
         coder_model=coder_model,
         temperature=args.agent_temperature,
         verbose=args.verbose,
+        llm_provider=args.llm_provider,
     )
 
     # ── Build initial state ─────────────────────────────────────

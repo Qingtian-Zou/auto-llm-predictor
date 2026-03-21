@@ -398,6 +398,7 @@ def create_app(*, verbose: bool = False) -> FastAPI:
         output: str = Form(""),
         test_ratio: float = Form(0.2),
         # Agent config
+        llm_provider: str = Form("openai"),
         agent_api_base: str = Form(""),
         agent_api_key: str = Form(""),
         agent_model: str = Form(""),
@@ -427,12 +428,18 @@ def create_app(*, verbose: bool = False) -> FastAPI:
         # Resolve env defaults
         load_dotenv()
         env_endpoint = os.getenv("openAI_endpoint", "")
-        api_base = agent_api_base or (f"http://{env_endpoint}/v1" if env_endpoint else "")
+        provider = llm_provider or os.getenv("llm_provider", "openai")
+        if provider == "ollama":
+            api_base = agent_api_base or (f"http://{env_endpoint}" if env_endpoint else "")
+        else:
+            api_base = agent_api_base or (f"http://{env_endpoint}/v1" if env_endpoint else "")
         api_key = agent_api_key or os.getenv("auth_key", "")
+        if provider == "ollama" and not api_key:
+            api_key = "ollama"  # placeholder; Ollama does not require auth
         a_model = agent_model or os.getenv("agent_LLM", "")
         c_model = coder_model or os.getenv("coder_LLM", "") or a_model
 
-        if not api_base or not api_key or not a_model:
+        if not api_base or (not api_key and provider != "ollama") or not a_model:
             return JSONResponse(
                 status_code=400,
                 content={"error": "Missing agent LLM configuration. "
@@ -478,6 +485,7 @@ def create_app(*, verbose: bool = False) -> FastAPI:
             coder_model=c_model,
             temperature=agent_temperature,
             verbose=verbose,
+            llm_provider=provider,
         )
 
         hp_args = SimpleNamespace(

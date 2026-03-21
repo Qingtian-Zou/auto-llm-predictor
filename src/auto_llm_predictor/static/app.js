@@ -94,6 +94,27 @@
         document.getElementById("test-file-name"),
     );
 
+    // ── LLM provider toggle ─────────────────────────────────────
+    const providerSelect = document.getElementById("llm-provider");
+    const apiBaseInput = document.getElementById("agent-api-base");
+    const apiKeyInput = document.getElementById("agent-api-key");
+    const apiKeyLabel = apiKeyInput ? apiKeyInput.previousElementSibling : null;
+
+    if (providerSelect) {
+        providerSelect.addEventListener("change", () => {
+            const isOllama = providerSelect.value === "ollama";
+            if (apiBaseInput) {
+                apiBaseInput.placeholder = isOllama ? "http://localhost:11434" : "from .env";
+            }
+            if (apiKeyInput) {
+                apiKeyInput.style.display = isOllama ? "none" : "";
+            }
+            if (apiKeyLabel) {
+                apiKeyLabel.style.display = isOllama ? "none" : "";
+            }
+        });
+    }
+
     // ── Form submission ─────────────────────────────────────────
     form.addEventListener("submit", async (e) => {
         e.preventDefault();

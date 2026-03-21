@@ -9,6 +9,7 @@ license = { text = "Apache-2.0" }
 requires-python = ">=3.11"
 dependencies = [
     "langgraph>=0.2",
+    "langchain>=0.3",
     "langchain-core>=0.3",
     "langchain-openai>=0.3",
     "openai>=2.24",
@@ -28,6 +29,9 @@ webui = [
     "fastapi>=0.115",
     "uvicorn[standard]>=0.30",
     "python-multipart>=0.0.7",
+]
+ollama = [
+    "langchain-ollama>=0.3",
 ]
 xai = [
     "shap>=0.42",

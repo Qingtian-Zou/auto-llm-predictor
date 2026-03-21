@@ -55,6 +55,39 @@ from auto_llm_predictor.nodes.verify import verify_prepared_data
 from auto_llm_predictor.state import PipelineState
 
 
+def _create_llm(
+    *,
+    provider: str,
+    base_url: str,
+    api_key: str,
+    model: str,
+    temperature: float,
+    max_tokens: int = 8192,
+) -> Any:
+    """Instantiate the correct LangChain chat model for the chosen provider."""
+    if provider == "ollama":
+        try:
+            from langchain_ollama import ChatOllama
+        except ImportError:
+            raise ImportError(
+                "langchain-ollama is required for Ollama support. "
+                "Install it with: pip install auto-llm-predictor[ollama]"
+            )
+        return ChatOllama(
+            base_url=base_url,
+            model=model,
+            temperature=temperature,
+            num_predict=max_tokens,
+        )
+    return ChatOpenAI(
+        base_url=base_url,
+        api_key=api_key,
+        model=model,
+        temperature=temperature,
+        max_tokens=max_tokens,
+    )
+
+
 def _bind_llm(node_fn, llm):
     """Wrap a node function so it receives the LLM as a keyword argument."""
     @functools.wraps(node_fn)
@@ -71,6 +104,7 @@ def build_graph(
     coder_model: str = "",
     temperature: float = 0.2,
     verbose: bool = False,
+    llm_provider: str = "openai",
 ) -> StateGraph:
     """Construct and compile the LangGraph pipeline.
 
@@ -78,34 +112,37 @@ def build_graph(
     ----------
     api_base : str
         OpenAI-compatible API endpoint (shared by both LLMs).
+        For Ollama, use ``http://host:port`` (no ``/v1`` suffix).
     api_key : str
-        API key / token for the LLM endpoint.
+        API key / token for the LLM endpoint.  Ignored for Ollama.
     agent_model : str
         Model ID for reasoning, planning, and data exploration.
     coder_model : str
         Model ID for code generation. Falls back to *agent_model* if empty.
     temperature : float
         Sampling temperature.
+    llm_provider : str
+        LLM backend: ``"openai"`` (default) or ``"ollama"``.
 
     Returns
     -------
     Compiled LangGraph application (with MemorySaver checkpointer for
     human-in-the-loop support via ``interrupt()``).
     """
-    agent_llm = ChatOpenAI(
+    agent_llm = _create_llm(
+        provider=llm_provider,
         base_url=api_base,
         api_key=api_key,
         model=agent_model,
         temperature=temperature,
-        max_tokens=8192,
     )
 
-    coder_llm = ChatOpenAI(
+    coder_llm = _create_llm(
+        provider=llm_provider,
         base_url=api_base,
         api_key=api_key,
         model=coder_model or agent_model,
         temperature=temperature,
-        max_tokens=8192,
     )
 
     if verbose:
