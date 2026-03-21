@@ -105,41 +105,80 @@ def _build_plan_summary(state: PipelineState) -> str:
     return "\n".join(parts)
 
 
-def _build_edit_feedback(state_updates: dict, edited_plan: dict) -> str:
-    """Build a concrete feedback string listing actual user edits.
+def _build_edit_feedback(
+    state_updates: dict,
+    edited_plan: dict,
+    original_state: dict | None = None,
+    original_plan: dict | None = None,
+) -> str:
+    """Build a concrete feedback string listing only the *changed* user edits.
 
-    Instead of a vague "I edited the plan" message, this enumerates every
-    changed field with its new value so the LLM can regenerate the plan
-    without asking clarifying questions.
+    Compares each field in the edited version against the original plan/state
+    and only reports fields that actually differ.  Unchanged fields are listed
+    separately so the LLM knows to adapt them for consistency (e.g. update
+    ``data_cleaning_steps`` when features change).
     """
     import json as _json
 
-    parts = [
-        "The user has manually edited the preparation plan JSON. "
-        "Here are the EXACT updated values that MUST be used:"
-    ]
+    if original_state is None:
+        original_state = {}
+    if original_plan is None:
+        original_plan = {}
 
     _STATE_KEYS = (
         "target_mapping", "target_column", "task_type",
         "selected_features", "dropped_features",
     )
-    for key in _STATE_KEYS:
-        if key in state_updates:
-            parts.append(f"- {key}: {_json.dumps(state_updates[key])}")
-
-    # Include any remaining plan-level keys the user may have changed
     _PLAN_KEYS = (
         "instruction_template", "input_format", "output_format",
         "balance_strategy", "test_ratio", "data_cleaning_steps",
     )
+
+    changed_parts: list[str] = []
+    changed_keys: set[str] = set()
+
+    for key in _STATE_KEYS:
+        if key in state_updates and state_updates[key] != original_state.get(key):
+            changed_parts.append(f"- {key}: {_json.dumps(state_updates[key])}")
+            changed_keys.add(key)
+
     for key in _PLAN_KEYS:
-        if key in edited_plan:
-            parts.append(f"- {key}: {_json.dumps(edited_plan[key])}")
+        if key in edited_plan and edited_plan[key] != original_plan.get(key):
+            changed_parts.append(f"- {key}: {_json.dumps(edited_plan[key])}")
+            changed_keys.add(key)
+
+    if not changed_parts:
+        return (
+            "The user re-submitted the plan JSON without meaningful changes. "
+            "Regenerate the plan as-is. "
+            "Respond ONLY with valid JSON — do NOT ask clarifying questions."
+        )
+
+    parts = [
+        "The user has manually edited the preparation plan JSON. "
+        "Here are ONLY the fields the user changed:"
+    ]
+    parts.extend(changed_parts)
+
+    # List unchanged fields so the LLM adapts them for consistency
+    all_keys = set(_STATE_KEYS) | set(_PLAN_KEYS)
+    unchanged_keys = sorted(all_keys - changed_keys)
+    if unchanged_keys:
+        parts.append(
+            "\nThe user did NOT explicitly change these fields, but you MUST "
+            "review and adapt them to be consistent with the changes above:"
+        )
+        parts.append(f"  {', '.join(unchanged_keys)}")
+        parts.append(
+            "For example, if features were added or removed, update "
+            "data_cleaning_steps to only reference current selected features, "
+            "and update instruction_template to reflect the correct feature "
+            "set and target mapping."
+        )
 
     parts.append(
-        "\nRegenerate the plan JSON incorporating these exact values. "
-        "Ensure 'instruction_template' perfectly reflects the updated "
-        "target_mapping and selected_features. "
+        "\nRegenerate the complete plan JSON incorporating the changed values "
+        "and adapting unchanged fields for consistency. "
         "Respond ONLY with valid JSON — do NOT ask clarifying questions."
     )
     return "\n".join(parts)
@@ -163,17 +202,29 @@ def review_prep_plan(state: PipelineState) -> dict:
         try:
             edited_plan = json.loads(user_response)
             logger.info("User submitted edited plan JSON directly")
+
+            # Capture originals before mutation so we can diff
+            try:
+                original_plan = json.loads(state.get("prep_plan", "{}"))
+            except json.JSONDecodeError:
+                original_plan = {}
+            original_state = {
+                k: state[k]
+                for k in ("target_column", "target_mapping", "task_type",
+                          "selected_features", "dropped_features")
+                if k in state
+            }
+
             # Extract state-level variables that may have been injected
             # for editing (keeps CLI and webUI in sync)
             state_updates: dict = {}
-            # Extract state-level variables
             for key in ("target_column", "target_mapping", "task_type", "selected_features", "dropped_features"):
                 if key in edited_plan:
                     state_updates[key] = edited_plan.pop(key)
 
-            # Build concrete feedback with the actual changed values
+            # Build feedback listing only the actually-changed fields
             state_updates["user_feedback"] = _build_edit_feedback(
-                state_updates, edited_plan,
+                state_updates, edited_plan, original_state, original_plan,
             )
 
             # The LLM will regenerate the plan, but we can pass the edited one
