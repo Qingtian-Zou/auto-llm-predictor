@@ -70,6 +70,7 @@ def build_graph(
     agent_model: str = "",
     coder_model: str = "",
     temperature: float = 0.2,
+    verbose: bool = False,
 ) -> StateGraph:
     """Construct and compile the LangGraph pipeline.
 
@@ -106,6 +107,12 @@ def build_graph(
         temperature=temperature,
         max_tokens=8192,
     )
+
+    if verbose:
+        from auto_llm_predictor.verbose import VerboseLLM
+
+        agent_llm = VerboseLLM(agent_llm, label="AGENT")
+        coder_llm = VerboseLLM(coder_llm, label="CODER")
 
     graph = StateGraph(PipelineState)
 

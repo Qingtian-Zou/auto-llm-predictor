@@ -373,7 +373,7 @@ def _run_standalone_xai_bg(run: RunState, output_dir: str, run_dir: str,
         _emit(run, "error", {"message": str(exc)})
 
 
-def create_app() -> FastAPI:
+def create_app(*, verbose: bool = False) -> FastAPI:
     """Build the FastAPI application."""
     app = FastAPI(title="Auto LLM Predictor — Web UI")
 
@@ -477,6 +477,7 @@ def create_app() -> FastAPI:
             agent_model=a_model,
             coder_model=c_model,
             temperature=agent_temperature,
+            verbose=verbose,
         )
 
         hp_args = SimpleNamespace(
@@ -1163,10 +1164,13 @@ def main():
     parser.add_argument("--host", default="0.0.0.0", help="Bind address (default: 0.0.0.0)")
     parser.add_argument("--port", type=int, default=8000, help="Port (default: 8000)")
     parser.add_argument("--reload", action="store_true", help="Enable auto-reload for development")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Enable verbose logging (print LLM prompts and responses to stderr)")
     args = parser.parse_args()
 
+    level = logging.DEBUG if args.verbose else logging.INFO
     logging.basicConfig(
-        level=logging.INFO,
+        level=level,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
         datefmt="%H:%M:%S",
     )
@@ -1176,7 +1180,7 @@ def main():
     print(f"  http://localhost:{args.port}")
     print("=" * 50)
 
-    app = create_app()
+    app = create_app(verbose=args.verbose)
     uvicorn.run(app, host=args.host, port=args.port)
 
 

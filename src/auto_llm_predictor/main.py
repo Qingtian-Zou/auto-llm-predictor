@@ -116,7 +116,8 @@ Examples:
                         help="Temperature for the agent LLM")
 
     # Logging
-    parser.add_argument("--verbose", "-v", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--verbose", "-v", action="store_true",
+                        help="Enable verbose logging (print LLM prompts and responses to stderr)")
 
     # Training hyperparameters (override defaults in generated YAML)
     hp = parser.add_argument_group("Training Hyperparameters")
@@ -222,6 +223,7 @@ Examples:
         agent_model=args.agent_model,
         coder_model=coder_model,
         temperature=args.agent_temperature,
+        verbose=args.verbose,
     )
 
     # ── Build initial state ─────────────────────────────────────
