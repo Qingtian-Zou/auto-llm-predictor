@@ -262,17 +262,36 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path, log_callback
             if (i + 1) % 10 == 0 or i == len(prompts) - 1:
                 _log(f"    SHAP: {i + 1}/{len(prompts)} samples", log_callback)
 
-        # Save SHAP HTML visualisation if possible
+        # Save SHAP HTML visualisation.
+        # shap.plots.text() crashes on batched TeacherForcing explanations
+        # because ragged token counts produce None in _compute_shape.
+        # Workaround: call per-sample (each has a consistent 2-D shape).
         shap_html: str | None = None
         try:
-            html_content = shap.plots.text(shap_values, display=False)
-            if html_content:
-                shap_html = str(html_content)
+            n_html = len(prompts)
+            fragments: list[str] = []
+            for idx in range(n_html):
+                sv = shap_values[idx] if len(prompts) > 1 else shap_values
+                fragment = shap.plots.text(sv, display=False)
+                if fragment:
+                    fragments.append(str(fragment))
+            if fragments:
+                shap_html = "\n<br>\n".join(fragments)
                 html_path = xai_dir / "shap_text.html"
                 Path(html_path).write_text(shap_html)
                 logger.info("Saved SHAP text plot to %s", html_path)
         except Exception as exc:
-            logger.debug("Could not save SHAP HTML plot: %s", exc)
+            logger.debug("shap.plots.text() failed (%s), falling back to custom HTML", exc)
+            try:
+                explained_samples = [s for s in sample_explanations if s.get("token_scores")]
+                if explained_samples:
+                    shap_html = _build_shap_html(explained_samples)
+                    html_path = xai_dir / "shap_text.html"
+                    Path(html_path).write_text(shap_html)
+                    logger.info("Saved SHAP text plot (fallback) to %s", html_path)
+            except Exception as exc2:
+                logger.debug("Fallback HTML also failed: %s", exc2)
+                _log(f"  ✗ Could not save SHAP HTML plot: {exc}\n", log_callback)
 
         explained = sum(1 for s in sample_explanations if s["token_scores"])
         _log(f"  ✓ SHAP complete: {explained}/{len(sample_explanations)} samples\n", log_callback)
@@ -494,6 +513,73 @@ def _run_attention(model, tokenizer, samples: list[dict], log_callback=None) -> 
         logger.warning("Attention fallback failed: %s", exc, exc_info=True)
         _log(f"  ✗ Attention fallback failed: {exc}\n", log_callback)
         return None
+
+
+# ── SHAP HTML helper ──────────────────────────────────────────────
+
+def _build_shap_html(sample_explanations: list[dict]) -> str:
+    """Build a self-contained HTML page showing per-token SHAP attributions.
+
+    This replaces ``shap.plots.text()`` which crashes on TeacherForcing
+    explanations due to a shape-computation bug in SHAP (``_compute_shape``
+    returns ``(None,)`` for string data, causing ``range(None)``).
+    """
+    import html as html_mod
+
+    lines = [
+        "<!DOCTYPE html>",
+        "<html><head><meta charset='utf-8'>",
+        "<title>SHAP Token Attributions</title>",
+        "<style>",
+        "body{font-family:system-ui,sans-serif;margin:2em;background:#fafafa}",
+        ".sample{background:#fff;border:1px solid #ddd;border-radius:6px;"
+        "padding:1em;margin-bottom:1.5em}",
+        ".sample h3{margin:0 0 .4em}",
+        ".tokens{display:flex;flex-wrap:wrap;gap:2px;margin:.6em 0}",
+        ".tok{padding:2px 4px;border-radius:3px;font-size:13px;font-family:monospace}",
+        "table{border-collapse:collapse;font-size:13px}",
+        "td,th{padding:3px 8px;border:1px solid #ddd;text-align:left}",
+        "th{background:#f5f5f5}",
+        "</style></head><body>",
+        "<h1>SHAP Token-Level Attributions</h1>",
+    ]
+
+    for s in sample_explanations:
+        tokens = s.get("token_scores", [])
+        if not tokens:
+            continue
+        idx = s.get("sample_index", "?")
+        label = html_mod.escape(str(s.get("true_label", "")))
+        preview = html_mod.escape(s.get("input_preview", "")[:200])
+
+        max_score = max((t["score"] for t in tokens), default=1) or 1
+
+        lines.append(f"<div class='sample'><h3>Sample {idx}</h3>")
+        lines.append(f"<p><b>True label:</b> {label}</p>")
+        lines.append(f"<p><b>Input:</b> <code>{preview}</code></p>")
+
+        # Token ribbon — colour intensity proportional to score
+        lines.append("<div class='tokens'>")
+        for t in tokens:
+            score = t["score"]
+            intensity = int(255 * (1 - score / max_score))
+            bg = f"rgb(255,{intensity},{intensity})"
+            tok_text = html_mod.escape(t["token"])
+            lines.append(
+                f"<span class='tok' style='background:{bg}' "
+                f"title='score={score:.4f}'>{tok_text}</span>"
+            )
+        lines.append("</div>")
+
+        # Score table
+        lines.append("<table><tr><th>Token</th><th>Score</th></tr>")
+        for t in tokens:
+            tok_text = html_mod.escape(t["token"])
+            lines.append(f"<tr><td>{tok_text}</td><td>{t['score']:.6f}</td></tr>")
+        lines.append("</table></div>")
+
+    lines.append("</body></html>")
+    return "\n".join(lines)
 
 
 # ── Visualisation ──────────────────────────────────────────────────
