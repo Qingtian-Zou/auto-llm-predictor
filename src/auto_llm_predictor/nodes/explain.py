@@ -221,6 +221,33 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path, log_callback
         else:
             shap_values = shap_result
 
+        # Save per-token SHAP values for all tokens (not just top-K).
+        # We use sv.values (partition-level scores replicated to each
+        # BPE token within a partition) rather than
+        # sv.hierarchical_values[:M] (tree leaf nodes which are often
+        # zero because attribution is stored at inner-node level).
+        # The file is named shap_leaf_values.json for backward compat.
+        try:
+            leaf_data = []
+            for idx in range(len(prompts)):
+                sv = shap_values[idx] if len(prompts) > 1 else shap_values
+                tokens_arr = sv.data
+                values_arr = sv.values
+                if values_arr is not None and tokens_arr is not None:
+                    leaf_data.append({
+                        "tokens": [str(t) for t in tokens_arr],
+                        "values": values_arr.tolist(),
+                    })
+            if leaf_data:
+                leaf_path = xai_dir / "shap_leaf_values.json"
+                import json as _json
+                Path(leaf_path).write_text(
+                    _json.dumps(leaf_data, ensure_ascii=False),
+                )
+                logger.info("Saved per-token SHAP values to %s", leaf_path)
+        except Exception as exc:
+            logger.debug("Could not save per-token SHAP values: %s", exc)
+
         # Extract per-sample token-level SHAP values
         sample_explanations = []
         for i in range(len(prompts)):
@@ -257,6 +284,7 @@ def _run_shap(model, tokenizer, samples: list[dict], xai_dir: Path, log_callback
                 "input_preview": prompts[i][:200],
                 "true_label": true_labels[i],
                 "token_scores": paired[:_TOP_K_TOKENS],
+                "all_token_scores": paired,
             })
 
             if (i + 1) % 10 == 0 or i == len(prompts) - 1:
