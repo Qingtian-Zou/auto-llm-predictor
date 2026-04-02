@@ -373,6 +373,44 @@ def _run_standalone_xai_bg(run: RunState, output_dir: str, run_dir: str,
         _emit(run, "error", {"message": str(exc)})
 
 
+def _run_baseline_bg(run: RunState, output_dir: str, model: str | None,
+                     baseline_dir: str | None, precision: str,
+                     quantization_bit: int | None,
+                     splits: list[str]) -> None:
+    """Execute baseline evaluation, emitting SSE events."""
+    from auto_llm_predictor.baseline import run_baseline_evaluation
+
+    try:
+        run.status = "running"
+        _emit(run, "status", {"status": "running", "message": "Baseline evaluation started"})
+
+        result = run_baseline_evaluation(
+            output_dir=output_dir,
+            model=model or None,
+            baseline_dir=baseline_dir or None,
+            precision=precision,
+            quantization_bit=quantization_bit,
+            splits=splits,
+            log_callback=lambda msg: _emit(run, "log", {"message": msg}),
+        )
+
+        run.final_state = result
+        _emit(run, "baseline_complete", {
+            "message": "Baseline evaluation complete!",
+            "results": result.get("results", {}),
+            "results_path": result.get("results_path", ""),
+            "model": result.get("model", ""),
+            "baseline_dir": result.get("baseline_dir", ""),
+        })
+        run.status = "completed"
+
+    except Exception as exc:
+        logger.exception("Baseline evaluation error for run %s", run.run_id)
+        run.status = "error"
+        run.error = str(exc)
+        _emit(run, "error", {"message": str(exc)})
+
+
 def create_app(*, verbose: bool = False) -> FastAPI:
     """Build the FastAPI application."""
     app = FastAPI(title="Auto LLM Predictor — Web UI")
@@ -1154,6 +1192,77 @@ def create_app(*, verbose: bool = False) -> FastAPI:
         return FileResponse(
             path=report_path,
             filename="xai_report.json",
+            media_type="application/json",
+        )
+
+    # ── Baseline: active run discovery ─────────────────────────
+    @app.get("/api/baseline/active")
+    async def get_active_baseline_run():
+        """Return the most recent baseline run that is still in progress."""
+        for run in reversed(list(_runs.values())):
+            if run.run_id.startswith("baseline-") and run.status in ("running", "pending"):
+                return {"run_id": run.run_id, "status": run.status}
+        return {"run_id": None}
+
+    # ── Baseline: run ────────────────────────────────────────
+    @app.post("/api/baseline/run")
+    async def start_baseline_evaluation(
+        output_dir: str = Form(...),
+        model: str = Form(""),
+        baseline_dir: str = Form(""),
+        precision: str = Form("bf16"),
+        quantization_bit: int | None = Form(None),
+        splits: str = Form("test"),
+    ):
+        output_dir = normalize_path(str(Path(output_dir).resolve()))
+
+        if not Path(output_dir).exists():
+            return JSONResponse(status_code=400, content={"error": f"Output directory not found: {output_dir}"})
+
+        resolved_baseline_dir = None
+        if baseline_dir.strip():
+            resolved_baseline_dir = normalize_path(str(Path(baseline_dir).resolve()))
+
+        split_list = [s.strip() for s in splits.split(",") if s.strip()]
+        if not split_list:
+            return JSONResponse(status_code=400, content={"error": "No valid splits specified."})
+
+        run_id = f"baseline-{uuid.uuid4().hex[:12]}"
+        loop = asyncio.get_event_loop()
+        run = RunState(
+            run_id=run_id,
+            queue=asyncio.Queue(),
+            loop=loop,
+        )
+        _prune_completed_runs()
+        _runs[run_id] = run
+
+        t = threading.Thread(
+            target=_run_baseline_bg,
+            args=(run, output_dir, model.strip() or None,
+                  resolved_baseline_dir, precision, quantization_bit,
+                  split_list),
+            daemon=True,
+        )
+        run.thread = t
+        t.start()
+
+        return {"run_id": run_id}
+
+    # ── Baseline: download results ───────────────────────────
+    @app.get("/api/baseline/download/{run_id}")
+    async def download_baseline_results(run_id: str):
+        run = _runs.get(run_id)
+        if not run:
+            return JSONResponse(status_code=404, content={"error": "Run not found"})
+
+        results_path = run.final_state.get("results_path", "")
+        if not results_path or not Path(results_path).is_file():
+            return JSONResponse(status_code=404, content={"error": "Baseline results not available yet."})
+
+        return FileResponse(
+            path=results_path,
+            filename="baseline_results.json",
             media_type="application/json",
         )
 

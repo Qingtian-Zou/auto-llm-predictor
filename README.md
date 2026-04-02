@@ -13,10 +13,11 @@ Automatically build a fine-tuned LLM predictor from any CSV dataset. Powered by 
 - **Self-Correcting Code Agent**: On script failure, a `debug_prep_failure` ReAct agent diagnoses the root cause before retrying — falls back to single-shot diagnosis for models without tool calling.
 - **Local Model Support**: `--model` accepts a local directory path in addition to HuggingFace IDs. Template is auto-detected from `config.json`; use `--template` to override.
 - **Post-Training Inference**: Batch or interactive single-sample predictions via CLI or Web UI, without re-running the pipeline.
+- **Baseline Evaluation**: Evaluate any non-finetuned model on the same prepared data to compare against the finetuned adapter — via CLI or Web UI.
 - **Explainable AI (XAI)**: Token-level explanations via SHAP, TransformerLens logit attribution, and attention fallback.
 - **Smart Data Handling**: Ensemble feature selection for high-dim data (≥50 cols); intelligent class balancing.
 - **Human-in-the-Loop**: Five interrupt checkpoints to override plans, code, or hyperparameters.
-- **Web UI**: Dashboard with live SSE logging, inline JSON/YAML editors, artifact export, and an Inference tab.
+- **Web UI**: Dashboard with live SSE logging, inline JSON/YAML editors, artifact export, and Inference / XAI / Baseline tabs.
 
 ## Pipeline
 
@@ -137,6 +138,25 @@ auto-llm-predictor-infer \
 
 Key inference flags: `--infer-csv`, `--infer-single`, `--infer-xai`, `--infer-precision` (`bf16`/`fp16`), `--infer-quantization-bit` (`4`/`8`), `--infer-flash-attn`.
 
+### Baseline Evaluation
+
+```bash
+# Evaluate the training run's base model (no adapter) on the test split
+auto-llm-predictor-baseline --output-dir output/my_dataset
+
+# Evaluate a different model
+auto-llm-predictor-baseline --output-dir output/my_dataset \
+    --model Qwen/Qwen2.5-7B-Instruct
+
+# Custom output directory, both splits
+auto-llm-predictor-baseline --output-dir output/my_dataset \
+    --model Qwen/Qwen2.5-7B-Instruct \
+    --baseline-dir output/my_dataset/baseline_qwen \
+    --splits test,train
+```
+
+Key baseline flags: `--model` (defaults to training run model), `--baseline-dir` (defaults to `output_dir/baseline_<model>/`), `--splits` (`test`, `train`, or `test,train`), `--precision` (`bf16`/`fp16`), `--quantization-bit` (`4`/`8`), `--flash-attn`.
+
 ### Standalone XAI
 
 ```bash
@@ -224,6 +244,10 @@ output/<csv_stem>/
 │   └── balance_data.py
 ├── feature_selection/           # (high-dim datasets only)
 ├── .pipeline_state.json         # state for --start-from
+├── baseline_<model_name>/       # (via baseline evaluation)
+│   ├── configs/                 # baseline predict YAML
+│   ├── predict_test/ predict_train/
+│   └── evaluation/results.json
 └── run_<timestamp>/
     ├── configs/                 # train.yaml, predict_*.yaml
     ├── sft/                     # LoRA adapter + logs
@@ -236,7 +260,7 @@ output/<csv_stem>/
 
 ```
 src/auto_llm_predictor/
-├── main.py / webui.py / inference.py / xai.py / graph.py / state.py
+├── main.py / webui.py / inference.py / xai.py / baseline.py / graph.py / state.py
 ├── checkpoint.py / utils.py
 ├── prompts/  explore.py  plan.py  codegen.py  debug.py  verify.py  balance.py
 └── nodes/

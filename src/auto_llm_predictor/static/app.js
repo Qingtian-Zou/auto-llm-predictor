@@ -1358,4 +1358,202 @@
             // No active XAI run or server unreachable — stay idle
         }
     })();
+
+    // ══════════════════════════════════════════════════════════
+    // BASELINE EVALUATION TAB
+    // ══════════════════════════════════════════════════════════
+
+    const baselineForm = document.getElementById("baseline-form");
+    const baselineRunBtn = document.getElementById("baseline-run-btn");
+    const baselineLog = document.getElementById("baseline-log");
+    const baselineResultsPanel = document.getElementById("baseline-results-panel");
+    const baselineResultsContent = document.getElementById("baseline-results-content");
+
+    function appendBaselineLog(msg, cls) {
+        if (!baselineLog) return;
+        const line = document.createElement("div");
+        line.className = "log__line" + (cls ? " log__line--" + cls : "");
+        line.textContent = msg;
+        baselineLog.appendChild(line);
+        baselineLog.scrollTop = baselineLog.scrollHeight;
+    }
+
+    let baselineEvtSource = null;
+    let baselineSseRetries = 0;
+    const BASELINE_SSE_MAX_RETRIES = 5;
+    let activeBaselineRunId = null;
+
+    function resetBaselineBtn() {
+        if (!baselineRunBtn) return;
+        baselineRunBtn.disabled = false;
+        baselineRunBtn.textContent = "Run Baseline Evaluation";
+    }
+
+    function renderBaselineMetrics(results) {
+        let html = "";
+        for (const [split, metrics] of Object.entries(results)) {
+            html += '<div style="margin-bottom:16px">';
+            html += '<h4 style="margin:0 0 8px;text-transform:uppercase;font-size:0.85rem;color:var(--text-dim)">' +
+                escapeHtml(split) + ' Results</h4>';
+
+            if (metrics.error) {
+                html += '<p style="color:var(--error)">Error: ' + escapeHtml(metrics.error) + '</p>';
+                html += '</div>';
+                continue;
+            }
+
+            html += '<table class="xai-tokens"><tbody>';
+            if ("mae" in metrics) {
+                // Regression
+                html += '<tr><td><strong>MAE</strong></td><td>' + metrics.mae.toFixed(4) + '</td></tr>';
+                html += '<tr><td><strong>MSE</strong></td><td>' + metrics.mse.toFixed(4) + '</td></tr>';
+                html += '<tr><td><strong>RMSE</strong></td><td>' + metrics.rmse.toFixed(4) + '</td></tr>';
+                html += '<tr><td><strong>R\u00b2</strong></td><td>' + metrics.r2.toFixed(4) + '</td></tr>';
+                html += '<tr><td><strong>Valid</strong></td><td>' +
+                    metrics.valid_predictions + ' / ' + metrics.total_samples + '</td></tr>';
+            } else {
+                // Classification
+                html += '<tr><td><strong>Accuracy</strong></td><td>' + (metrics.accuracy || 0).toFixed(4) + '</td></tr>';
+                if (metrics.f1 !== undefined) {
+                    html += '<tr><td><strong>F1</strong></td><td>' + metrics.f1.toFixed(4) + '</td></tr>';
+                }
+                if (metrics.macro_f1 !== undefined) {
+                    html += '<tr><td><strong>Macro F1</strong></td><td>' + metrics.macro_f1.toFixed(4) + '</td></tr>';
+                    html += '<tr><td><strong>Weighted F1</strong></td><td>' + metrics.weighted_f1.toFixed(4) + '</td></tr>';
+                }
+                html += '<tr><td><strong>Valid</strong></td><td>' +
+                    (metrics.valid_predictions || 0) + ' / ' + (metrics.total_samples || 0) + '</td></tr>';
+                if (metrics.invalid_predictions) {
+                    html += '<tr><td><strong>Invalid</strong></td><td>' + metrics.invalid_predictions + '</td></tr>';
+                }
+            }
+            html += '</tbody></table>';
+            html += '</div>';
+        }
+        return html;
+    }
+
+    function connectBaselineSSE(runId) {
+        if (baselineEvtSource) baselineEvtSource.close();
+        baselineSseRetries = 0;
+        activeBaselineRunId = runId;
+        baselineEvtSource = new EventSource("/api/events/" + runId);
+
+        baselineEvtSource.onmessage = function (ev) {
+            baselineSseRetries = 0;
+            let evt;
+            try { evt = JSON.parse(ev.data); } catch { return; }
+
+            if (evt.event === "log") {
+                appendBaselineLog(evt.message || "");
+            } else if (evt.event === "status") {
+                appendBaselineLog(evt.message || "", "status");
+            } else if (evt.event === "baseline_complete") {
+                appendBaselineLog("\u2713 " + (evt.message || "Complete!"), "status");
+                baselineResultsPanel.classList.remove("results-panel--hidden");
+                let html = '<p><strong>Model:</strong> ' + escapeHtml(evt.model || "") + '</p>';
+                if (evt.baseline_dir) {
+                    html += '<p><strong>Output:</strong> ' + escapeHtml(evt.baseline_dir) + '</p>';
+                }
+                html += '<hr style="margin:12px 0">';
+                html += renderBaselineMetrics(evt.results || {});
+                if (evt.results_path) {
+                    html += '<a href="/api/baseline/download/' + runId +
+                        '" class="btn btn--sm btn--secondary" download>\u2b07 Download Results</a>';
+                }
+                baselineResultsContent.innerHTML = html;
+                resetBaselineBtn();
+                baselineEvtSource.close();
+            } else if (evt.event === "error") {
+                appendBaselineLog("\u2717 Error: " + (evt.message || ""), "error");
+                resetBaselineBtn();
+                baselineEvtSource.close();
+            }
+        };
+
+        baselineEvtSource.onerror = function () {
+            if (baselineEvtSource.readyState === EventSource.CLOSED) {
+                appendBaselineLog("SSE connection closed.", "status");
+            } else {
+                baselineSseRetries++;
+                if (baselineSseRetries >= BASELINE_SSE_MAX_RETRIES) {
+                    baselineEvtSource.close();
+                    appendBaselineLog("SSE connection lost after " + BASELINE_SSE_MAX_RETRIES + " retries.", "error");
+                    resetBaselineBtn();
+                }
+            }
+        };
+    }
+
+    if (baselineForm) {
+        baselineForm.addEventListener("submit", async function (e) {
+            e.preventDefault();
+
+            const outputDir = document.getElementById("baseline-output-dir").value.trim();
+            if (!outputDir) {
+                alert("Please fill in the Training Output Directory.");
+                return;
+            }
+
+            // Collect splits
+            const splits = [];
+            if (document.getElementById("baseline-split-test").checked) splits.push("test");
+            if (document.getElementById("baseline-split-train").checked) splits.push("train");
+            if (!splits.length) {
+                alert("Please select at least one split (Test or Train).");
+                return;
+            }
+
+            // Clear previous
+            baselineLog.innerHTML = "";
+            baselineResultsPanel.classList.add("results-panel--hidden");
+            baselineRunBtn.disabled = true;
+            baselineRunBtn.innerHTML = '<span class="spinner"></span> Running\u2026';
+
+            const fd = new FormData();
+            fd.append("output_dir", outputDir);
+            fd.append("model", document.getElementById("baseline-model").value.trim());
+            fd.append("baseline_dir", document.getElementById("baseline-dir").value.trim());
+            fd.append("precision", document.getElementById("baseline-precision").value);
+            const qbit = document.getElementById("baseline-quantization-bit").value;
+            if (qbit) fd.append("quantization_bit", qbit);
+            fd.append("splits", splits.join(","));
+
+            try {
+                const res = await fetch("/api/baseline/run", { method: "POST", body: fd });
+                const data = await res.json();
+
+                if (!res.ok) {
+                    appendBaselineLog("Error: " + (data.error || "Unknown error"), "error");
+                    resetBaselineBtn();
+                    return;
+                }
+
+                const runId = data.run_id;
+                appendBaselineLog("Baseline evaluation started (run " + runId + ")", "status");
+                connectBaselineSSE(runId);
+            } catch (err) {
+                appendBaselineLog("Network error: " + err.message, "error");
+                resetBaselineBtn();
+            }
+        });
+    }
+
+    // ── Baseline: Auto-reconnect on page load ────────────────
+    (async function checkActiveBaselineRun() {
+        try {
+            const res = await fetch("/api/baseline/active");
+            const data = await res.json();
+            if (data.run_id) {
+                appendBaselineLog("Reconnected to active baseline run [" + data.run_id + "] (" + data.status + ")", "status");
+                if (baselineRunBtn) {
+                    baselineRunBtn.disabled = true;
+                    baselineRunBtn.innerHTML = '<span class="spinner"></span> Running\u2026';
+                }
+                connectBaselineSSE(data.run_id);
+            }
+        } catch (err) {
+            // No active baseline run or server unreachable — stay idle
+        }
+    })();
 })();
