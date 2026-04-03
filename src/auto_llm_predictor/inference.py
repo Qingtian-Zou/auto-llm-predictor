@@ -266,7 +266,8 @@ def run_batch_inference(
     print("=" * 60 + "\n", flush=True)
 
     success, _, lmf_output = run_llamafactory(
-        yaml_path, timeout=7200, stream=True, log_callback=log_callback,
+        yaml_path, timeout=86400, stream=True,
+        log_callback=log_callback, idle_timeout=300,
     )
 
     predictions_path = Path(infer_output) / "generated_predictions.jsonl"

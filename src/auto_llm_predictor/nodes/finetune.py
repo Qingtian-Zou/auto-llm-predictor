@@ -100,9 +100,10 @@ def run_finetuning(state: PipelineState, config: RunnableConfig) -> dict:
 
         success, return_code, output = run_llamafactory(
             yaml_path,
-            timeout=7200,
+            timeout=86400,
             stream=True,
             log_callback=log_callback,
+            idle_timeout=600,
         )
 
         if success:

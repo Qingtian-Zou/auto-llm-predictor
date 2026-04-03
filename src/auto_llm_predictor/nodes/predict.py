@@ -66,7 +66,8 @@ def run_prediction(state: PipelineState, config: RunnableConfig) -> dict:
         print("=" * 60 + "\n", flush=True)
 
         success, _, output = run_llamafactory(
-            yaml_path, timeout=3600, stream=True, log_callback=log_callback
+            yaml_path, timeout=86400, stream=True,
+            log_callback=log_callback, idle_timeout=300,
         )
 
         pred_path = run_dir / pred_dir_name / "generated_predictions.jsonl"

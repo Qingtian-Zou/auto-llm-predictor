@@ -113,6 +113,7 @@ def run_llamafactory(
     stream: bool = True,
     tail_chars: int = 5000,
     log_callback: callable | None = None,
+    idle_timeout: int | None = None,
 ) -> tuple[bool, int | None, str]:
     """Run llamafactory-cli train with a YAML config.
 
@@ -121,10 +122,17 @@ def run_llamafactory(
     last *tail_chars* characters of the combined output are returned
     for downstream state storage.
 
-    Returns (success, return_code, output_tail).  Timeout defaults to 2 hours.
+    *idle_timeout* enables activity-based timeout: if the subprocess
+    produces no output for *idle_timeout* seconds it is killed.  When
+    set, *timeout* acts as a wall-clock safety net.  When ``None``
+    (default), the legacy behaviour of a single wall-clock timeout is
+    used.
+
+    Returns (success, return_code, output_tail).
     """
     import os
     import sys
+    import time
     import threading
     from collections import deque
 
@@ -152,13 +160,20 @@ def run_llamafactory(
     # ── Streaming mode: print output live ─────────────────────
     output_lines: deque[str] = deque(maxlen=200)  # keep last 200 lines
 
+    # Activity tracking for idle-timeout watchdog
+    last_activity = time.monotonic()
+    activity_lock = threading.Lock()
+
     def _reader(pipe, prefix=""):
         """Read lines from a pipe, print them, and store in buffer."""
+        nonlocal last_activity
         try:
             for line in iter(pipe.readline, ""):
                 line = line.rstrip("\n")
                 print(f"{prefix}{line}", flush=True)
                 output_lines.append(line)
+                with activity_lock:
+                    last_activity = time.monotonic()
                 if log_callback:
                     log_callback(f"{prefix}{line}")
         except ValueError:
@@ -186,7 +201,31 @@ def run_llamafactory(
         stdout_thread.start()
         stderr_thread.start()
 
-        proc.wait(timeout=timeout)
+        if idle_timeout is not None:
+            # Activity-based watchdog: poll for process exit while
+            # checking that output is still being produced.
+            poll_interval = 5
+            start_time = time.monotonic()
+            while True:
+                try:
+                    proc.wait(timeout=poll_interval)
+                    break  # process exited
+                except subprocess.TimeoutExpired:
+                    now = time.monotonic()
+                    with activity_lock:
+                        idle_seconds = now - last_activity
+                    if idle_seconds > idle_timeout:
+                        raise subprocess.TimeoutExpired(
+                            cmd, idle_timeout,
+                            output=f"No output for {idle_seconds:.0f}s "
+                                   f"(idle_timeout={idle_timeout}s)",
+                        )
+                    if now - start_time > timeout:
+                        raise subprocess.TimeoutExpired(cmd, timeout)
+        else:
+            # Legacy behaviour: single wall-clock wait
+            proc.wait(timeout=timeout)
+
         stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)
 
@@ -196,13 +235,14 @@ def run_llamafactory(
 
         return proc.returncode == 0, proc.returncode, output_tail
 
-    except subprocess.TimeoutExpired:
+    except subprocess.TimeoutExpired as e:
         proc.kill()
         proc.wait()
         # Ensure reader threads finish before returning
         stdout_thread.join(timeout=5)
         stderr_thread.join(timeout=5)
-        return False, proc.returncode, f"llamafactory-cli timed out after {timeout}s"
+        msg = str(e.output) if e.output else f"llamafactory-cli timed out after {timeout}s"
+        return False, proc.returncode, msg
     except Exception as e:
         return False, None, f"Failed to run llamafactory-cli: {e}"
 
