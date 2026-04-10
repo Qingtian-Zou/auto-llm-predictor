@@ -34,6 +34,7 @@ import argparse
 import json
 import logging
 import os
+import random
 import shutil
 import sys
 from collections.abc import Callable
@@ -336,9 +337,11 @@ def _build_xai_samples(
             if line:
                 predictions.append(json.loads(line))
 
-    n = min(len(infer_data), len(predictions), max_samples)
+    pool = min(len(infer_data), len(predictions))
+    n = min(pool, max_samples)
+    indices = random.sample(range(pool), n) if n < pool else list(range(pool))
     samples: list[dict] = []
-    for i in range(n):
+    for i in indices:
         entry = infer_data[i]
         pred = predictions[i].get("predict", "")
         samples.append({

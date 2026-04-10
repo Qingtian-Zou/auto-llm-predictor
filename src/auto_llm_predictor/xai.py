@@ -28,6 +28,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import random
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -138,7 +139,10 @@ def run_standalone_xai(
     if not test_data:
         raise ValueError("Test data is empty — nothing to explain.")
 
-    samples = test_data[:max_samples]
+    if len(test_data) <= max_samples:
+        samples = test_data
+    else:
+        samples = random.sample(test_data, max_samples)
 
     # ── XAI hardware defaults ──────────────────────────────────
     if training_config.get("precision") in (None, "bf16"):
