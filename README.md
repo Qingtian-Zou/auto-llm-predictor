@@ -23,20 +23,21 @@ Automatically build a fine-tuned LLM predictor from any CSV dataset. Powered by 
 
 ```mermaid
 graph TD
-    A["explore_data"] --> B{"≥50 cols?"}
-    B -->|yes| FS["select_features<br/>(ensemble)"]
+    A["explore_data"] --> SI["split_input_csv<br/>(stratified, no-op if --test-csv given)"]
+    SI --> B{"≥50 cols?"}
+    B -->|yes| FS["select_features<br/>(ensemble, train-only)"]
     B -->|no| C["plan_preparation"]
     FS --> C
     C --> RP["review_prep_plan<br/>⏸ interrupt"]
     RP -->|approve| D["write_prep_code"]
     RP -->|revise| C
-    D --> E["execute_prep_code"]
+    D --> E["execute_prep_code<br/>(fits transformers on train,<br/>applies to test, saves transformers.pkl)"]
     E -->|failed| DBG["debug_prep_failure<br/>(ReAct agent)"]
     DBG -->|retry| D
     DBG -->|abort| V
     E -->|success| V["verify_prepared_data<br/>(LLM automated)"]
     V --> R1["review_prep_data<br/>⏸ interrupt"]
-    R1 -->|approve| S["split_data"]
+    R1 -->|approve| S["data_registration"]
     R1 -->|balance| WB["write_balance_code"]
     R1 -->|revise| C
     WB --> EB["execute_balance_code"]
@@ -57,17 +58,18 @@ graph TD
 | Stage | What it does |
 |-------|-------------|
 | **explore_data** | ReAct agent with sandboxed tools iteratively investigates the CSV, then identifies target column, task type, and label mapping. Verifies header alignment when `--test-csv` is provided. |
-| **select_features** | Ensemble for high-dim data (≥50 cols): variance filter → correlation → mutual information → Random Forest → average-rank aggregation |
+| **split_input_csv** | Stratified train/test split of the input CSV at the start of the pipeline so that every later step sees only training data. No-op when `--test-csv` is provided. |
+| **select_features** | Ensemble for high-dim data (≥50 cols): variance filter → correlation → mutual information → Random Forest → average-rank aggregation. Run on training data only. |
 | **plan_preparation** | LLM decides instruction template, input format, balancing strategy, and cleaning steps |
 | **review_prep_plan** | ⏸ Human reviews features, instruction, target mapping, balance strategy. Accepts `approve`, feedback text, or a raw JSON override. |
-| **write_prep_code** | LLM generates a Python script to convert CSV → `all_data.json` |
-| **execute_prep_code** | Runs the script; routes to debug agent on failure |
+| **write_prep_code** | LLM generates a Python script with a stable CLI (`--input-csv`, `--test-csv`, `--output-dir`, `--predict-only`) that fits transformers on train, transforms test, and persists fitted transformers to `transformers.pkl` |
+| **execute_prep_code** | Runs the script with the train + test CSV paths; validates that `all_data.json`, `test_data.json`, and `transformers.pkl` were produced |
 | **debug_prep_failure** | ReAct agent diagnoses failures (reads files, runs snippets), produces a diagnosis for the next codegen attempt. Routes to retry or abort. |
 | **verify_prepared_data** | LLM checks random samples for Alpaca format, label consistency, and cross-split terminology |
 | **review_prep_data** | ⏸ Human reviews data stats and LLM critique. Can `approve`, request balancing, or give feedback to re-plan. |
-| **write/execute_balance_code** | LLM generates and runs a balancing script (retry on failure) |
+| **write/execute_balance_code** | LLM generates and runs a balancing script (retry on failure). Operates on training data only. |
 | **review_balanced_data** | ⏸ Human reviews class distributions before/after balancing |
-| **split_data** | Deterministic stratified split, or direct assignment if `--test-csv` is provided |
+| **data_registration** | Copies `all_data.json` / `test_data.json` to the canonical `train.json` / `test.json` filenames and writes the LlamaFactory `dataset_info.json` registry |
 | **determine_cutoff_len** | ⏸ Analyzes token lengths; pauses for percentile choice if max exceeds 10k tokens |
 | **generate_lmf_config** | Creates LlamaFactory YAML configs for training and prediction |
 | **review_lmf_config** | ⏸ Human reviews hyperparameters. Accepts `approve`, key-value overrides, or a raw YAML override. |
@@ -104,7 +106,7 @@ auto-llm-predictor --csv data.csv --model mistralai/Mistral-7B-Instruct-v0.3 \
 
 # Resume from a checkpoint
 auto-llm-predictor --csv data.csv --model mistralai/Mistral-7B-Instruct-v0.3 \
-    --output output/exp1 --start-from split --test-ratio 0.3
+    --output output/exp1 --start-from register --test-ratio 0.3
 
 # Local model (template auto-detected from config.json)
 auto-llm-predictor --csv data.csv --model /models/Mistral-7B --template llama3
@@ -188,9 +190,9 @@ CLI flags override `.env` values.
 | `--template` | *(auto-detect)* | LlamaFactory chat template (e.g. `llama3`, `qwen`, `mistral`) |
 | `--target` | *(auto-detect)* | Target column name |
 | `--output` | `output/<csv_stem>` | Output directory |
-| `--test-csv` | *(none)* | Separate test CSV (skips splitting) |
-| `--test-ratio` | `0.2` | Test split ratio |
-| `--start-from` | *(none)* | Resume from: `review_prep`, `split`, or `config` |
+| `--test-csv` | *(none)* | Separate test CSV (skips the auto-split of the input CSV) |
+| `--test-ratio` | `0.2` | Auto-split ratio when no `--test-csv` is provided |
+| `--start-from` | *(none)* | Resume from: `review_prep`, `register`, or `config` |
 | `--llm-provider` | `openai` | LLM backend: `openai` or `ollama` (env: `llm_provider`) |
 | `--agent-api-base` | env: `openAI_endpoint` | API base URL (`http://host:port/v1` for openai, `http://host:port` for ollama) |
 | `--agent-api-key` | env: `auth_key` | API key (not required for Ollama) |
@@ -224,7 +226,7 @@ Five interrupt checkpoints — respond with `approve`, feedback text, or a direc
 | Checkpoint | Supported feedback patterns |
 |------------|---------------------------|
 | **review_prep_plan** | `drop features: ...`, `add features: ...`, `change instruction to: ...`, `change target mapping: ...`, `use oversample` |
-| **review_prep_data** | Same as above plus `keep only features: ...`, `test_ratio: 0.3`, `balance` / `oversample` / `undersample` |
+| **review_prep_data** | Same as above plus `keep only features: ...`, `balance` / `oversample` / `undersample` |
 | **determine_cutoff_len** | `approve` / Enter, `p95` / `p90` / `p85` / `p80`, or a custom integer (e.g. `4096`) |
 | **review_balanced_data** | `approve`, `use undersample instead`, `balance_strategy: none` |
 | **review_lmf_config** | `lora_rank: 32`, `num_train_epochs: 5`, `learning_rate: 1.0e-5`, or any LlamaFactory key |
@@ -236,11 +238,14 @@ Direct JSON/YAML override: paste a complete JSON block (plan review) or YAML blo
 ```
 output/<csv_stem>/
 ├── data/
-│   ├── all_data.json / train.json / test.json
+│   ├── train.csv / test.csv     # auto-split from --csv (skipped if --test-csv given)
+│   ├── all_data.json / test_data.json
+│   ├── train.json / test.json   # canonical names registered with LlamaFactory
 │   ├── balanced_data.json       # (if balancing used)
+│   ├── transformers.pkl         # fitted transformers for inference reuse
 │   └── dataset_info.json
 ├── scripts/
-│   ├── prepare_data.py
+│   ├── prepare_data.py          # accepts --input-csv / --test-csv / --output-dir / --predict-only
 │   └── balance_data.py
 ├── feature_selection/           # (high-dim datasets only)
 ├── .pipeline_state.json         # state for --start-from
@@ -265,10 +270,11 @@ src/auto_llm_predictor/
 ├── prompts/  explore.py  plan.py  codegen.py  debug.py  verify.py  balance.py
 └── nodes/
     ├── explore.py          # ReAct agent: identifies target & task
+    ├── split_input.py      # early stratified train/test split of the input CSV
     ├── feature_selection.py
     ├── plan.py / codegen.py / execute.py
     ├── debug.py            # ReAct agent: diagnoses failures
-    ├── verify.py / balance.py / review.py / split.py
+    ├── verify.py / balance.py / review.py / data_registration.py
     ├── config.py / finetune.py / predict.py / evaluate.py / explain.py
 ```
 

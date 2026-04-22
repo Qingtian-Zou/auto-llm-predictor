@@ -88,11 +88,18 @@ def profile_csv(csv_path: str, max_rows: int = 5, max_cols: int = 60) -> str:
     return "\n".join(parts)
 
 
-def run_script(script_path: str, timeout: int = 300) -> tuple[bool, str]:
+def run_script(
+    script_path: str,
+    timeout: int = 300,
+    args: list[str] | None = None,
+) -> tuple[bool, str]:
     """Run a Python script and return (success, combined_output)."""
+    cmd = [sys.executable, str(script_path)]
+    if args:
+        cmd.extend(args)
     try:
         result = subprocess.run(
-            [sys.executable, str(script_path)],
+            cmd,
             capture_output=True,
             text=True,
             timeout=timeout,

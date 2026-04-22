@@ -21,7 +21,6 @@ Respond ONLY with valid JSON (no markdown fences) in this exact schema:
   "input_format": "<description of how to format each row's features as text, e.g. 'Key: Value pairs, one per line, like Age: 45\\nGender: Male'>",
   "output_format": "<description of how to format the target label, e.g. 'The mapped label string, e.g. Positive'>",
   "target_mapping": {"<raw_value>": "<label>"}   (MUST include ALL classes from the provided target_mapping; use {{}} for regression),
-  "test_ratio": 0.2   (used by a later splitting step, NOT by the data preparation script),
   "balance_strategy": "none | oversample | undersample",
   "data_cleaning_steps": ["step1", "step2", ...],
   "reasoning": "<brief explanation>"

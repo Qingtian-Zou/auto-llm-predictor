@@ -246,10 +246,10 @@
 
     // ── Ordered pipeline steps for accurate tracking ────────────
     const PIPELINE_STEPS = [
-        "explore_data", "select_features", "plan_preparation",
+        "explore_data", "split_input_csv", "select_features", "plan_preparation",
         "review_prep_plan", "write_prep_code", "execute_prep_code",
         "verify_prepared_data", "review_prep_data", "write_balance_code",
-        "execute_balance_code", "review_balanced_data", "split_data",
+        "execute_balance_code", "review_balanced_data", "data_registration",
         "determine_cutoff_len", "generate_lmf_config", "review_lmf_config",
         "run_finetuning", "run_prediction", "run_evaluation",
     ];

@@ -50,7 +50,8 @@ from auto_llm_predictor.nodes.review import (
     route_after_plan_review,
     route_after_review,
 )
-from auto_llm_predictor.nodes.split import split_data
+from auto_llm_predictor.nodes.data_registration import register_dataset
+from auto_llm_predictor.nodes.split_input import split_input_csv
 from auto_llm_predictor.nodes.verify import verify_prepared_data
 from auto_llm_predictor.state import PipelineState
 
@@ -164,7 +165,7 @@ def build_graph(
         routes = {
             "explore_data": "explore_data",
             "review_prep": "review_prep_data",
-            "split": "split_data",
+            "register": "data_registration",
             "config": "generate_lmf_config",
         }
         return routes.get(target, "explore_data")
@@ -174,6 +175,7 @@ def build_graph(
     # ── Add nodes ──────────────────────────────────────────────
     # Agent LLM: reasoning, planning, data exploration
     graph.add_node("explore_data", _bind_llm(explore_data, agent_llm))
+    graph.add_node("split_input_csv", split_input_csv)
     graph.add_node("select_features", select_features)
     graph.add_node("plan_preparation", _bind_llm(plan_preparation, agent_llm))
     graph.add_node("review_prep_plan", review_prep_plan)
@@ -189,7 +191,7 @@ def build_graph(
     graph.add_node("review_balanced_data", review_balanced_data)
 
     # No LLM needed
-    graph.add_node("split_data", split_data)
+    graph.add_node("data_registration", register_dataset)
     graph.add_node("determine_cutoff_len", determine_cutoff_len)
     graph.add_node("generate_lmf_config", generate_lmf_config)
     graph.add_node("review_lmf_config", review_lmf_config)
@@ -208,14 +210,18 @@ def build_graph(
         {
             "explore_data": "explore_data",
             "review_prep_data": "review_prep_data",
-            "split_data": "split_data",
+            "data_registration": "data_registration",
             "generate_lmf_config": "generate_lmf_config",
         },
     )
 
-    # Conditional: high-dimensional data gets ensemble feature selection
+    # explore_data → split_input_csv → (feature selection or plan)
+    graph.add_edge("explore_data", "split_input_csv")
+
+    # Conditional: high-dimensional data gets ensemble feature selection.
+    # Runs on training-only data because split_input_csv has updated csv_path.
     graph.add_conditional_edges(
-        "explore_data",
+        "split_input_csv",
         check_feature_complexity,
         {
             "select_features": "select_features",
@@ -255,12 +261,12 @@ def build_graph(
     graph.add_edge("verify_prepared_data", "review_prep_data")
 
     # Human-in-the-loop: review prepared data
-    # 3-way routing: approve → split, balance, or revise
+    # 3-way routing: approve → register, balance, or revise
     graph.add_conditional_edges(
         "review_prep_data",
         route_after_review,
         {
-            "split_data": "split_data",
+            "data_registration": "data_registration",
             "write_balance_code": "write_balance_code",
             "plan_preparation": "plan_preparation",
         },
@@ -282,13 +288,13 @@ def build_graph(
         "review_balanced_data",
         route_after_balance_review,
         {
-            "split_data": "split_data",
+            "data_registration": "data_registration",
             "write_balance_code": "write_balance_code",
         },
     )
 
-    # split → cutoff detection → config generation
-    graph.add_edge("split_data", "determine_cutoff_len")
+    # registration → cutoff detection → config generation
+    graph.add_edge("data_registration", "determine_cutoff_len")
     graph.add_edge("determine_cutoff_len", "generate_lmf_config")
 
     graph.add_edge("generate_lmf_config", "review_lmf_config")

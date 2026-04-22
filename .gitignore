@@ -12,7 +12,7 @@ build/
 *.egg
 
 # Project outputs
-output/
+output*
 test_data.csv
 
 # IDE

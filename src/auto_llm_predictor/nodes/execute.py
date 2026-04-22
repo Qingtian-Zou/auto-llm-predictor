@@ -68,21 +68,43 @@ def execute_prep_code(state: PipelineState) -> dict:
             "messages": [HumanMessage(content="[execute_prep_code] No prep script path available.")],
         }
     output_data_dir = Path(state["output_dir"]) / "data"
+    output_data_dir.mkdir(parents=True, exist_ok=True)
 
-    logger.info("Executing prep script: %s", script_path)
-    success, output = run_script(script_path, timeout=300)
+    csv_path = state["csv_path"]
+    test_csv_path = state.get("test_csv_path", "")
+
+    script_args = [
+        "--input-csv", csv_path,
+        "--output-dir", str(output_data_dir),
+    ]
+    if test_csv_path:
+        script_args.extend(["--test-csv", test_csv_path])
+
+    logger.info(
+        "Executing prep script: %s %s", script_path, " ".join(script_args),
+    )
+    success, output = run_script(script_path, timeout=300, args=script_args)
 
     # Check required output files
     all_data_path = output_data_dir / "all_data.json"
     info_path = output_data_dir / "dataset_info.json"
+    transformers_path = output_data_dir / "transformers.pkl"
 
     files_exist = all_data_path.exists() and info_path.exists()
 
     # Optionally check test_data.json when test CSV was provided
     test_data_path = output_data_dir / "test_data.json"
-    has_test_csv = bool(state.get("test_csv_path"))
+    has_test_csv = bool(test_csv_path)
     if has_test_csv and not test_data_path.exists():
         output += "\n\nERROR: Test CSV was provided but test_data.json not found."
+        success = False
+
+    if success and not transformers_path.exists():
+        output += (
+            "\n\nERROR: Script succeeded but transformers.pkl not found. "
+            f"Expected: {transformers_path}. The prep script must persist "
+            "fitted transformers (or an empty dict) so inference can reuse them."
+        )
         success = False
 
     if success and not files_exist:

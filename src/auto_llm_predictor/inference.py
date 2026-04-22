@@ -203,31 +203,33 @@ def run_batch_inference(
     infer_data_dir = Path(infer_output) / "data"
     infer_data_dir.mkdir(parents=True, exist_ok=True)
 
-    # Run the prep script with environment variables pointing to new CSV
-    # and inference data output directory
-    env_overrides = {
-        "INFER_CSV_PATH": csv_path,
-        "INFER_OUTPUT_DIR": str(infer_data_dir),
-    }
-
-    # Create an inference wrapper script that modifies the existing
-    # prepare_data.py to use the new CSV path and output directory
-    wrapper_script = Path(infer_output) / "scripts" / "prepare_infer_data.py"
-    wrapper_script.parent.mkdir(parents=True, exist_ok=True)
-
-    original_code = prep_script.read_text()
-    wrapper_code = _create_inference_wrapper(original_code, csv_path, str(infer_data_dir))
-    wrapper_script.write_text(wrapper_code)
-    logger.info("Created inference wrapper script at %s", wrapper_script)
+    # Copy fitted transformers from the training run so the prep script can
+    # reload them in --predict-only mode instead of refitting.
+    train_transformers = Path(output_dir) / "data" / "transformers.pkl"
+    if not train_transformers.exists():
+        raise FileNotFoundError(
+            f"Training transformers not found at {train_transformers}. "
+            f"This run was likely produced by an older pipeline that did not "
+            f"persist fitted transformers. Re-train with the current pipeline."
+        )
+    shutil.copy2(train_transformers, infer_data_dir / "transformers.pkl")
 
     print("=" * 60)
     print("BATCH INFERENCE — Data Preparation")
     print(f"CSV:        {csv_path}")
-    print(f"Script:     {wrapper_script}")
+    print(f"Script:     {prep_script}")
     print(f"Output:     {infer_data_dir}")
     print("=" * 60 + "\n", flush=True)
 
-    success, output = run_script(str(wrapper_script), timeout=600)
+    success, output = run_script(
+        str(prep_script),
+        timeout=600,
+        args=[
+            "--input-csv", csv_path,
+            "--output-dir", str(infer_data_dir),
+            "--predict-only",
+        ],
+    )
     if not success:
         raise RuntimeError(f"Data preparation failed:\n{output[-2000:]}")
 
@@ -497,78 +499,6 @@ def run_batch_xai(
         "xai_results": method_results,
         "methods_succeeded": [r["method"] for r in method_results],
     }
-
-
-def _create_inference_wrapper(original_code: str, csv_path: str, output_dir: str) -> str:
-    """Create a modified version of prepare_data.py for inference.
-
-    Replaces the CSV path and output directory references, and removes
-    test CSV handling and any train/test split logic.
-    """
-    # Build the wrapper that patches paths before running the original logic
-    wrapper = f'''\
-"""Auto-generated inference data preparation wrapper.
-
-This script wraps the original prepare_data.py to process a new CSV
-file for inference.  It patches the CSV path and output directory.
-"""
-
-import os
-import sys
-
-# Override paths for inference
-os.environ["INFER_MODE"] = "1"
-_INFER_CSV_PATH = {csv_path!r}
-_INFER_OUTPUT_DIR = {output_dir!r}
-
-# ── Original prepare_data.py (with path patches) ──────────────
-
-'''
-
-    # Common path variable patterns in the generated scripts
-    import re
-
-    modified = original_code
-
-    # Replace csv_path / csv_file / input_path assignments
-    # These are typically at the top of the generated script
-    # We use a pattern to find the main CSV path assignment
-    csv_patterns = [
-        (r'(csv_path\s*=\s*)["\'].*?["\']', rf'\1_INFER_CSV_PATH'),
-        (r'(csv_file\s*=\s*)["\'].*?["\']', rf'\1_INFER_CSV_PATH'),
-        (r'(input_path\s*=\s*)["\'].*?["\']', rf'\1_INFER_CSV_PATH'),
-        (r'(input_csv\s*=\s*)["\'].*?["\']', rf'\1_INFER_CSV_PATH'),
-    ]
-    for pattern, repl in csv_patterns:
-        modified = re.sub(pattern, repl, modified, count=1)
-
-    # Replace output directory assignments
-    output_patterns = [
-        (r'(output_dir\s*=\s*)["\'].*?["\']', rf'\1_INFER_OUTPUT_DIR'),
-        (r'(output_data_dir\s*=\s*)["\'].*?["\']', rf'\1_INFER_OUTPUT_DIR'),
-        (r'(data_dir\s*=\s*)["\'].*?["\']', rf'\1_INFER_OUTPUT_DIR'),
-    ]
-    for pattern, repl in output_patterns:
-        modified = re.sub(pattern, repl, modified, count=1)
-
-    # Remove test CSV handling (lines that reference test_csv_path or test CSV)
-    lines = modified.split('\n')
-    filtered_lines = []
-    skip_block = False
-    for line in lines:
-        # Skip test CSV related blocks
-        if 'test_csv' in line.lower() and ('path' in line.lower() or '=' in line):
-            if 'test_data' in line.lower() or 'test_csv_path' in line.lower():
-                skip_block = True
-                continue
-        if skip_block and line.strip() and not line.startswith(' ') and not line.startswith('\t'):
-            skip_block = False
-        if not skip_block:
-            filtered_lines.append(line)
-
-    modified = '\n'.join(filtered_lines)
-
-    return wrapper + modified
 
 
 # ---------------------------------------------------------------------------

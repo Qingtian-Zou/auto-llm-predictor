@@ -58,6 +58,62 @@ class TestMarkdownFenceStripping:
 
 
 # ---------------------------------------------------------------------------
+# Codegen prompt: structured CLI + transformer persistence
+# ---------------------------------------------------------------------------
+
+class TestCodegenPromptCli:
+    """The codegen prompt must instruct the LLM to expose --predict-only,
+    --input-csv, --test-csv, --output-dir, and to persist transformers.pkl."""
+
+    def _format(self, **overrides):
+        from auto_llm_predictor.prompts.codegen import format_codegen_prompt
+
+        defaults = dict(
+            csv_path="/tmp/train.csv",
+            data_profile="profile",
+            target_column="t",
+            task_type="binary",
+            target_mapping={"0": "no", "1": "yes"},
+            selected_features=["a"],
+            instruction_template="i",
+            input_format="f",
+            output_format="o",
+            data_cleaning_steps=[],
+            output_data_dir="/tmp/data",
+            test_csv_path="/tmp/test.csv",
+        )
+        defaults.update(overrides)
+        return format_codegen_prompt(**defaults)
+
+    def test_prompt_mentions_predict_only_flag(self):
+        prompt = self._format()
+        assert "--predict-only" in prompt
+
+    def test_prompt_mentions_required_cli_flags(self):
+        prompt = self._format()
+        for flag in ("--input-csv", "--test-csv", "--output-dir"):
+            assert flag in prompt, f"missing {flag} in codegen prompt"
+
+    def test_prompt_mentions_transformers_pickle(self):
+        prompt = self._format()
+        assert "transformers.pkl" in prompt
+
+    def test_prompt_emphasizes_fit_on_train(self):
+        prompt = self._format()
+        # The prompt should explicitly forbid refitting on test data.
+        assert ".fit(" in prompt or "fit_transform" in prompt
+        # And mention applying to test
+        assert "transform" in prompt.lower()
+
+    def test_prompt_handles_no_test_csv(self):
+        """When no test CSV is supplied, the prompt should say so explicitly
+        and still require --predict-only / transformers.pkl."""
+        prompt = self._format(test_csv_path="")
+        assert "--predict-only" in prompt
+        assert "transformers.pkl" in prompt
+
+
+# ---------------------------------------------------------------------------
 # Balance timeout constant
 # ---------------------------------------------------------------------------
 

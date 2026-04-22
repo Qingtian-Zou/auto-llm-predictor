@@ -27,7 +27,6 @@ def _apply_feedback_overrides(plan: dict, feedback: str) -> dict:
         - "add features: col1, col2"   /  "include features: col1, col2"
         - "keep only features: col1, col2"
         - "balance: oversample"  /  "use undersample"  /  "balance_strategy: none"
-        - "test_ratio: 0.3"  /  "test ratio: 0.3"
         - "instruction: <new instruction text>"
     """
     fb = feedback.lower()
@@ -95,15 +94,6 @@ def _apply_feedback_overrides(plan: dict, feedback: str) -> dict:
         strategy = balance_match.group(1).lower()
         plan["balance_strategy"] = strategy
         logger.info("User requested balance strategy: %s", strategy)
-
-    # ── Test ratio ────────────────────────────────────────────
-    ratio_match = re.search(
-        r"test[\s_]ratio\s*[:\-]\s*([\d.]+)",
-        fb, re.IGNORECASE,
-    )
-    if ratio_match:
-        plan["test_ratio"] = float(ratio_match.group(1))
-        logger.info("User requested test ratio: %s", plan["test_ratio"])
 
     # ── Instruction template ──────────────────────────────────
     instr_match = re.search(

@@ -7,8 +7,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # _apply_feedback_overrides
@@ -40,11 +38,6 @@ class TestFeedbackOverrides:
         plan = {"selected_features": [], "dropped_features": []}
         result = self._apply(plan, "use oversample")
         assert result["balance_strategy"] == "oversample"
-
-    def test_test_ratio(self):
-        plan = {"selected_features": [], "dropped_features": []}
-        result = self._apply(plan, "test_ratio: 0.3")
-        assert result["test_ratio"] == pytest.approx(0.3)
 
 
 # ---------------------------------------------------------------------------

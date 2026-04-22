@@ -100,10 +100,10 @@ class PipelineState(TypedDict):
     """Path to all_data.json (main CSV → Alpaca format, pre-split)."""
 
     train_data_path: str
-    """Path to train.json (created by split_data)."""
+    """Path to train.json (created by data_registration node)."""
 
     test_data_path: str
-    """Path to test.json (created by split_data)."""
+    """Path to test.json (created by data_registration node)."""
 
     dataset_info_path: str
     """Path to dataset_info.json for LlamaFactory."""

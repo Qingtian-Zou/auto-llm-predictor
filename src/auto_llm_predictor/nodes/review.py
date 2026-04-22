@@ -75,7 +75,6 @@ def _build_plan_summary(state: PipelineState) -> str:
         f"Input format:    {plan.get('input_format', 'N/A')}",
         f"Output format:   {plan.get('output_format', 'N/A')}",
         f"Balance strategy: {plan.get('balance_strategy', 'none')}",
-        f"Test ratio:      {plan.get('test_ratio', 0.2)}",
     ])
 
     cleaning = plan.get("data_cleaning_steps", [])
@@ -131,7 +130,7 @@ def _build_edit_feedback(
     )
     _PLAN_KEYS = (
         "instruction_template", "input_format", "output_format",
-        "balance_strategy", "test_ratio", "data_cleaning_steps",
+        "balance_strategy", "data_cleaning_steps",
     )
 
     changed_parts: list[str] = []
@@ -357,7 +356,7 @@ def _build_review_summary(state: PipelineState) -> str:
         "",
         "=" * 60,
         "Please review the above and respond with one of:",
-        "  'approve'   — Continue to splitting & config generation",
+        "  'approve'   — Continue to data registration & fine-tuning config generation",
         "  'balance'   — Proceed to balance training data (oversample/undersample)",
         "  Or provide feedback to revise the data preparation, e.g.:",
         "    'drop features: patient_id, smoker'",
@@ -407,14 +406,14 @@ def review_prep_data(state: PipelineState) -> dict:
 def route_after_review(state: PipelineState) -> str:
     """Conditional edge: route based on user review.
 
-    Returns 'split_data' if approved (skip balancing),
+    Returns 'data_registration' if approved (skip balancing),
     'write_balance_code' if user wants to balance,
     'plan_preparation' to re-plan with user feedback.
     """
     feedback = state.get("user_feedback", "")
     if not feedback:
-        # Approved — skip balancing, go to split
-        return "split_data"
+        # Approved — skip balancing, go to LlamaFactory registration
+        return "data_registration"
     if feedback.lower() in ("balance", "balance data", "yes balance", "oversample", "undersample"):
         return "write_balance_code"
     # Check for explicit balance request in free-text
@@ -754,10 +753,10 @@ def review_balanced_data(state: PipelineState) -> dict:
 def route_after_balance_review(state: PipelineState) -> str:
     """Conditional edge: route based on balance review.
 
-    Returns 'split_data' if approved,
+    Returns 'data_registration' if approved,
     'write_balance_code' to re-balance with feedback.
     """
     feedback = state.get("balance_feedback", "")
     if not feedback:
-        return "split_data"
+        return "data_registration"
     return "write_balance_code"

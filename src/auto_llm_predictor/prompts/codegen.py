@@ -5,19 +5,26 @@ You are an expert Python programmer. You write clean, production-quality \
 data preparation scripts. Your scripts MUST:
 
 1. Be completely self-contained (no imports from custom packages)
-2. Use only: pandas, numpy, json, sklearn, random, pathlib, argparse, sys, os, math
-3. Read the CSV, apply the preparation plan, and produce output files
-4. Handle edge cases (missing values, unexpected types) gracefully
-5. Print progress messages to stdout
-6. For classification tasks, preserve ALL target classes exactly as specified in the target_mapping — never merge, drop, or simplify classes unless specifically instructed otherwise. For regression tasks, target_mapping will be empty; output the raw target value.
+2. Use only: pandas, numpy, json, pickle, sklearn, random, pathlib, argparse, sys, os, math
+3. Expose a stable command-line interface (argparse) so the same script can \
+be invoked at training time and at inference time without source edits
+4. Apply data-dependent transformations correctly: fit on training data only, \
+then apply (without refitting) to test data and to any future inference CSV
+5. Persist all fitted transformers to disk so inference can reload them
+6. Print progress messages to stdout
+7. For classification tasks, preserve ALL target classes exactly as specified \
+in the target_mapping — never merge, drop, or simplify classes unless \
+specifically instructed otherwise. For regression tasks, target_mapping will \
+be empty; output the raw target value.
 
-Output ONLY the complete Python script with no markdown fences, no explanation. \
-Just the raw Python code.
+Output ONLY the complete Python script with no markdown fences, no \
+explanation. Just the raw Python code.
 """
 
 CODEGEN_USER = """\
 Write a Python script that converts CSV data into LlamaFactory-compatible \
-Alpaca JSON format for fine-tuning.
+Alpaca JSON format for fine-tuning, with a stable CLI so it can be reused \
+for inference.
 
 === DATASET PROFILE ===
 {data_profile}
@@ -33,44 +40,91 @@ Output format: {output_format}
 Data cleaning steps: {data_cleaning_steps}
 
 === INPUT FILES ===
-Main CSV: {csv_path}
+Main (training) CSV: {csv_path}
 {test_csv_section}
 
 === OUTPUT REQUIREMENTS ===
-The script must save files to the directory: {output_data_dir}
+The script must save files to the directory passed via ``--output-dir``. \
+At training time the orchestrator will pass: ``--output-dir {output_data_dir}``.
 
-{output_files_section}
+=== REQUIRED COMMAND-LINE INTERFACE ===
+Implement argparse with EXACTLY these flags:
 
-The script should:
-- Load the CSV from {csv_path}
-- Apply data cleaning (drop missing targets, handle NaN features)
-- For each row, create an example dict:
+    --input-csv PATH       (required) Path to the training CSV in training mode,
+                           or the new CSV to score in --predict-only mode.
+    --test-csv PATH        (optional) Path to the test CSV. Ignored in
+                           --predict-only mode.
+    --output-dir PATH      (required) Directory where outputs are written.
+    --predict-only         (flag)     Inference mode. See below.
+
+=== TWO OPERATING MODES ===
+
+Training mode (default — no ``--predict-only``):
+  1. Load --input-csv as the *training* DataFrame and --test-csv as the *test*
+     DataFrame (if provided).
+  2. Apply all data cleaning and fit any data-dependent transformer
+     (LabelEncoder, OrdinalEncoder, OneHotEncoder, StandardScaler,
+     MinMaxScaler, SimpleImputer, vocabularies, target-encoded categories,
+     learned bins, etc.) using the TRAINING DataFrame ONLY. Do NOT call
+     `.fit(...)` or `.fit_transform(...)` on the test DataFrame.
+  3. Apply the SAME fitted instances (via `.transform(...)`) to the test
+     DataFrame. Constants derived from data (means, medians, modes, min/max,
+     class lists, quantile cutoffs) must come from training and be reused
+     verbatim for test.
+  4. Stateless row-level operations (string casts, simple arithmetic on a
+     single value, target_mapping lookups) may be applied independently to
+     either DataFrame.
+  5. Convert each row of the training DataFrame to an Alpaca dict
+     {{"instruction": ..., "input": ..., "output": ...}} and write
+     ``all_data.json`` (list of dicts).
+  6. Convert each row of the test DataFrame the same way and write
+     ``test_data.json``.
+  7. Pickle every fitted transformer (and any data-derived constants) to
+     ``<output-dir>/transformers.pkl``. The recommended structure is a single
+     dict, e.g. ``{{"label_encoder": le, "scaler": scaler, "feature_columns": cols}}``.
+     If no transformers were fitted (purely stateless preprocessing), still
+     write the file with an empty dict so downstream code can rely on it
+     existing.
+  8. Write ``dataset_info.json``:
+     {{"train": {{"file_name": "all_data.json"}}, "test": {{"file_name": "test_data.json"}}}}
+
+Predict-only mode (``--predict-only`` flag set):
+  1. Load ``<output-dir>/transformers.pkl``. If it does not exist, exit with
+     a clear error message and a non-zero status code — do NOT silently
+     re-fit.
+  2. Load --input-csv as the inference DataFrame. Ignore --test-csv if given.
+  3. Apply the loaded transformers via ``.transform(...)`` only. Never call
+     ``.fit(...)`` or ``.fit_transform(...)`` in this mode.
+  4. Convert each row to an Alpaca dict the same way as training mode and
+     write ``all_data.json`` only. Do NOT write ``test_data.json``,
+     ``dataset_info.json``, or re-pickle transformers.
+
+=== ADDITIONAL RULES ===
+- Per row, build the example dict with:
   * "instruction": the instruction template (same for every row)
   * "input": selected features formatted as readable text
-  * "output": the target label (for classification: mapped using target_mapping, MUST preserve ALL classes; for regression: the raw numeric value as a string)
-- DO NOT randomly split data into train/test — that is handled by a later step. If a separate test CSV is provided, process it independently as described above.
-- DO NOT apply any class balancing (oversampling/undersampling) — that is handled by a separate step
-- Save the JSON files
-- Print summary statistics (total samples, class distribution)
+  * "output": the target label (for classification: mapped using
+    target_mapping, MUST preserve ALL classes; for regression: the raw
+    numeric value as a string). In ``--predict-only`` mode the target
+    column may be absent — emit an empty string for "output" in that case.
+- DO NOT randomly split data into train/test — splitting has already
+  happened upstream of this script.
+- DO NOT apply any class balancing (oversampling/undersampling) — that is
+  handled by a separate step downstream.
+- Print summary statistics (number of rows processed, class distribution
+  where applicable) per CSV.
+- Handle edge cases gracefully: missing values in features, unexpected
+  types, target column absent in predict-only mode.
 
 {error_context}
 {user_feedback_context}
 """
 
 _TEST_CSV_SECTION = """\
-Test CSV:  {test_csv_path}
-(A separate test set is provided. Process it using the same logic as the main CSV.)"""
-
-_OUTPUT_SINGLE = """\
-1. all_data.json — list of dicts with keys: "instruction", "input", "output"
-2. dataset_info.json — LlamaFactory dataset registry:
-   {{"train": {{"file_name": "all_data.json"}}}}"""
-
-_OUTPUT_WITH_TEST = """\
-1. all_data.json — list of dicts from the main CSV, keys: "instruction", "input", "output"
-2. test_data.json — list of dicts from the test CSV, same format
-3. dataset_info.json — LlamaFactory dataset registry:
-   {{"train": {{"file_name": "all_data.json"}}, "test": {{"file_name": "test_data.json"}}}}"""
+Test CSV: {test_csv_path}
+The test CSV has been split off from the training data upstream and shares
+the same schema. Process it via the same fitted transformers — see the
+training-mode rules below."""
 
 CODEGEN_RETRY_CONTEXT = """\
 === PREVIOUS ATTEMPT FAILED ===
@@ -145,13 +199,13 @@ def format_codegen_prompt(
     if user_feedback:
         user_feedback_context = CODEGEN_FEEDBACK_CONTEXT.format(feedback=user_feedback)
 
-    # Build sections based on whether a test CSV is provided
     if test_csv_path:
         test_csv_section = _TEST_CSV_SECTION.format(test_csv_path=test_csv_path)
-        output_files_section = _OUTPUT_WITH_TEST
     else:
-        test_csv_section = "(No separate test CSV — splitting handled by a later step)"
-        output_files_section = _OUTPUT_SINGLE
+        test_csv_section = (
+            "Test CSV: (none — only --input-csv will be passed; do not write "
+            "test_data.json in this case)"
+        )
 
     return CODEGEN_USER.format(
         csv_path=csv_path,
@@ -166,7 +220,6 @@ def format_codegen_prompt(
         data_cleaning_steps=data_cleaning_steps,
         output_data_dir=output_data_dir,
         test_csv_section=test_csv_section,
-        output_files_section=output_files_section,
         error_context=error_context,
         user_feedback_context=user_feedback_context,
     )

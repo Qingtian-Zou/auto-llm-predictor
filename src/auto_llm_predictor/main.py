@@ -103,7 +103,7 @@ Examples:
     parser.add_argument("--test-ratio", type=float, default=0.2,
                         help="Test split ratio when no test CSV is provided (default: 0.2)")
     parser.add_argument("--start-from",
-                        choices=["review_prep", "split", "config"],
+                        choices=["review_prep", "register", "config"],
                         default=None,
                         help="Resume from a previous run (requires --output pointing to existing experiment)")
 
