@@ -753,6 +753,16 @@
                         <input type="text" id="baseline-model"
                             placeholder="Leave empty to use model from training run" class="form__input">
 
+                        <label class="form__label" for="baseline-template">Chat Template
+                            <span class="form__optional">(auto-detect if empty)</span>
+                            <span class="tooltip-wrap">
+                                <span class="tooltip-icon">i</span>
+                                <span class="tooltip-text">LlamaFactory chat template (e.g. llama3, qwen, mistral). Auto-guessed from the model name if empty.</span>
+                            </span>
+                        </label>
+                        <input type="text" id="baseline-template"
+                            placeholder="e.g. llama3, qwen, mistral" class="form__input">
+
                         <label class="form__label" for="baseline-dir">Baseline Output Directory
                             <span class="tooltip-wrap">
                                 <span class="tooltip-icon">i</span>

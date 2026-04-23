@@ -374,6 +374,7 @@ def _run_standalone_xai_bg(run: RunState, output_dir: str, run_dir: str,
 
 
 def _run_baseline_bg(run: RunState, output_dir: str, model: str | None,
+                     template: str | None,
                      baseline_dir: str | None, precision: str,
                      quantization_bit: int | None,
                      splits: list[str]) -> None:
@@ -387,6 +388,7 @@ def _run_baseline_bg(run: RunState, output_dir: str, model: str | None,
         result = run_baseline_evaluation(
             output_dir=output_dir,
             model=model or None,
+            template=template or None,
             baseline_dir=baseline_dir or None,
             precision=precision,
             quantization_bit=quantization_bit,
@@ -1209,6 +1211,7 @@ def create_app(*, verbose: bool = False) -> FastAPI:
     async def start_baseline_evaluation(
         output_dir: str = Form(...),
         model: str = Form(""),
+        template: str = Form(""),
         baseline_dir: str = Form(""),
         precision: str = Form("bf16"),
         quantization_bit: int | None = Form(None),
@@ -1240,6 +1243,7 @@ def create_app(*, verbose: bool = False) -> FastAPI:
         t = threading.Thread(
             target=_run_baseline_bg,
             args=(run, output_dir, model.strip() or None,
+                  template.strip() or None,
                   resolved_baseline_dir, precision, quantization_bit,
                   split_list),
             daemon=True,

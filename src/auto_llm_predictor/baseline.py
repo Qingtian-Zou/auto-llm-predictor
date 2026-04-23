@@ -205,6 +205,7 @@ def run_baseline_evaluation(
     *,
     output_dir: str,
     model: str | None = None,
+    template: str | None = None,
     baseline_dir: str | None = None,
     precision: str = "bf16",
     flash_attn: str = "auto",
@@ -222,6 +223,9 @@ def run_baseline_evaluation(
     model : str, optional
         HuggingFace model ID or local path.  Defaults to the model
         used during training (from pipeline state).
+    template : str, optional
+        LlamaFactory chat template (e.g. ``llama3``, ``qwen``,
+        ``mistral``).  Auto-guessed from the model name if not provided.
     baseline_dir : str, optional
         Custom output directory for baseline results.  Defaults to
         ``output_dir/baseline_<sanitized_model_name>/``.
@@ -270,9 +274,12 @@ def run_baseline_evaluation(
     else:
         _log(f"Using user-specified model: {model}")
 
-    # 3. Guess template
-    template = _guess_template(model)
-    _log(f"Using template: {template}")
+    # 3. Resolve template (user override > auto-guess)
+    if template:
+        _log(f"Using user-specified template: {template}")
+    else:
+        template = _guess_template(model)
+        _log(f"Auto-guessed template: {template}")
 
     # 4. Resolve baseline output directory
     if not baseline_dir:
@@ -375,6 +382,11 @@ def main():
         help="HuggingFace model ID or local path. Defaults to the model from the training run.",
     )
     parser.add_argument(
+        "--template", default=None,
+        help="LlamaFactory chat template (e.g. llama3, qwen, mistral). "
+             "Auto-guessed from the model name if not set.",
+    )
+    parser.add_argument(
         "--baseline-dir", default=None,
         help="Custom output directory for baseline results. "
              "Defaults to output_dir/baseline_<model_name>/.",
@@ -426,6 +438,7 @@ def main():
         result = run_baseline_evaluation(
             output_dir=output_dir,
             model=args.model,
+            template=args.template,
             baseline_dir=baseline_dir,
             precision=args.precision,
             flash_attn=args.flash_attn,

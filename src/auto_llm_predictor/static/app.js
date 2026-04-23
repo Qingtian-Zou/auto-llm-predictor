@@ -1513,6 +1513,7 @@
             const fd = new FormData();
             fd.append("output_dir", outputDir);
             fd.append("model", document.getElementById("baseline-model").value.trim());
+            fd.append("template", document.getElementById("baseline-template").value.trim());
             fd.append("baseline_dir", document.getElementById("baseline-dir").value.trim());
             fd.append("precision", document.getElementById("baseline-precision").value);
             const qbit = document.getElementById("baseline-quantization-bit").value;
