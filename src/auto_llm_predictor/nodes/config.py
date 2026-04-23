@@ -132,7 +132,7 @@ save_strategy: steps
 save_total_limit: 3
 plot_loss: true
 overwrite_output_dir: true
-report_to: tensorboard
+report_to: none
 
 ### train
 per_device_train_batch_size: {batch_size}
