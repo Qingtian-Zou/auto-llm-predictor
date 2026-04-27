@@ -23,8 +23,9 @@ Automatically build a fine-tuned LLM predictor from any CSV dataset. Powered by 
 
 ```mermaid
 graph TD
-    A["explore_data"] --> SI["split_input_csv<br/>(stratified, no-op if --test-csv given)"]
-    SI --> B{"≥50 cols?"}
+    A["explore_data"] --> SI{"--test-csv is given?"}
+    SI -->|yes| B{"≥50 cols?"}
+    SI -->|no| SYI["split_input_csv"] --> B
     B -->|yes| FS["select_features<br/>(ensemble, train-only)"]
     B -->|no| C["plan_preparation"]
     FS --> C
