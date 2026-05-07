@@ -5,7 +5,7 @@ methods in priority order:
 
 1. **SHAP** — Partition-based SHAP values via a text-generation pipeline
    wrapper (``shap.Explainer``).  Produces per-token Shapley attribution.
-2. **TransformerLens** — Logit attribution via ``HookedTransformer``.
+2. **TransformerLens** — Logit attribution via ``TransformerBridge``.
    Decomposes the residual stream to find each token's contribution to
    the final prediction logit.
 3. **Attention** (fallback) — Eager-mode attention weights from the last
@@ -364,7 +364,7 @@ def _run_transformer_lens(
     decomposition.  Returns a result dict or None on failure.
     """
     try:
-        from transformer_lens import HookedTransformer
+        from transformer_lens.model_bridge import TransformerBridge
     except ImportError:
         logger.info("transformer_lens not installed — skipping TransformerLens method.")
         return None
@@ -372,13 +372,39 @@ def _run_transformer_lens(
     try:
         import torch
 
-        _log("  Loading HookedTransformer...", log_callback)
-        hooked = HookedTransformer.from_pretrained(
+        # TransformerLens 3.1.0's set_processed_weights wraps every weight in
+        # nn.Parameter() (requires_grad=True), which fails on int8/uint8
+        # tensors from BitsAndBytes-quantized models. Detect and skip cleanly
+        # rather than crash mid-processing.
+        if any(not p.dtype.is_floating_point for p in model.parameters()):
+            logger.info(
+                "TransformerLens requires a non-quantized model; the merged "
+                "model contains integer-dtype weights. Skipping — re-run with "
+                "--quantization-bit none to enable."
+            )
+            _log("  ⚠ TransformerLens skipped (model is quantized)\n", log_callback)
+            return None
+
+        _log("  Loading TransformerBridge...", log_callback)
+        hooked = TransformerBridge.boot_transformers(
             base_model,
             hf_model=model,
             tokenizer=tokenizer,
             device=model.device,
         )
+        # Apply HookedTransformer-equivalent weight processing so W_U and
+        # the resid_post cache key match the legacy logit-attribution math.
+        try:
+            hooked.enable_compatibility_mode(disable_warnings=True)
+        except RuntimeError as exc:
+            logger.warning(
+                "enable_compatibility_mode failed (%s); retrying with "
+                "no_processing=True — logit attribution will skip LN folding "
+                "and weight centering.", exc,
+            )
+            hooked.enable_compatibility_mode(
+                disable_warnings=True, no_processing=True,
+            )
 
         sample_explanations = []
         for i, entry in enumerate(samples):

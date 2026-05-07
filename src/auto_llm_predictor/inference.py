@@ -52,6 +52,19 @@ logger = logging.getLogger(__name__)
 # Helpers
 # ---------------------------------------------------------------------------
 
+def _parse_qbit(value: str) -> int | None:
+    """argparse type for --infer-quantization-bit accepting 4, 8, or 'none'."""
+    if value is None:
+        return None
+    if value.lower() in ("none", "0", "off"):
+        return None
+    if value in ("4", "8"):
+        return int(value)
+    raise argparse.ArgumentTypeError(
+        f"quantization-bit must be 4, 8, or 'none' — got {value!r}"
+    )
+
+
 def _load_pipeline_state(output_dir: str) -> dict:
     """Load the saved pipeline state from a training output directory."""
     from auto_llm_predictor.checkpoint import load_state
@@ -857,8 +870,8 @@ Examples:
         help="Run XAI explanations on predictions (batch or single mode)",
     )
     parser.add_argument(
-        "--infer-quantization-bit", type=int, choices=[4, 8], default=None,
-        help="Quantization bits (4 or 8)",
+        "--infer-quantization-bit", type=_parse_qbit, default=None,
+        help="Quantization bits: 4, 8, or 'none' to disable (default: 8 when --infer-xai is set, else off)",
     )
     parser.add_argument(
         "--infer-flash-attn", default="auto", choices=["auto", "fa2", "disabled"],

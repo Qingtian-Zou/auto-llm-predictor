@@ -49,6 +49,19 @@ def _load_pipeline_state(output_dir: str) -> dict:
     return load_state(output_dir)
 
 
+def _parse_qbit(value: str) -> int | None:
+    """argparse type for --quantization-bit accepting 4, 8, or 'none'."""
+    if value is None:
+        return None
+    if value.lower() in ("none", "0", "off"):
+        return None
+    if value in ("4", "8"):
+        return int(value)
+    raise argparse.ArgumentTypeError(
+        f"quantization-bit must be 4, 8, or 'none' — got {value!r}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # Core XAI function
 # ---------------------------------------------------------------------------
@@ -282,8 +295,9 @@ Examples:
         help="Precision (default: fp16)",
     )
     parser.add_argument(
-        "--quantization-bit", type=int, choices=[4, 8], default=8,
-        help="Quantization bits (default: 8)",
+        "--quantization-bit", type=_parse_qbit, default=8,
+        help="Quantization bits: 4, 8, or 'none' to disable (default: 8). "
+             "Pass 'none' to enable TransformerLens, which requires fp weights, but note that this can increase VRAM usage significantly.",
     )
     parser.add_argument(
         "--flash-attn", default="auto", choices=["auto", "fa2", "disabled"],
@@ -322,7 +336,8 @@ Examples:
     print(f"Run dir:       {run_dir}")
     print(f"Max samples:   {args.max_samples}")
     print(f"Precision:     {args.precision}")
-    print(f"Quantization:  {args.quantization_bit}-bit")
+    qbit_display = f"{args.quantization_bit}-bit" if args.quantization_bit else "disabled"
+    print(f"Quantization:  {qbit_display}")
     print("=" * 60 + "\n")
 
     try:
