@@ -1,6 +1,7 @@
-.python-version
 .history
 .env
+/plans/
+past-references
 
 # Python
 __pycache__/
@@ -10,6 +11,8 @@ __pycache__/
 dist/
 build/
 *.egg
+uv.lock
+.python-version
 
 # Project outputs
 output*
