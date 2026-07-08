@@ -176,6 +176,7 @@ preprocessing_num_workers: 16
 ### output
 output_dir: {predict_train_dir}
 overwrite_output_dir: true
+report_to: none
 
 ### eval
 per_device_eval_batch_size: 1
@@ -208,6 +209,7 @@ preprocessing_num_workers: 16
 ### output
 output_dir: {predict_test_dir}
 overwrite_output_dir: true
+report_to: none
 
 ### eval
 per_device_eval_batch_size: 1
